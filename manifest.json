@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "USPTO Data Scraper",
+  "version": "1.0.0",
+  "action": {
+    "default_popup": "index.html"
+  },
+  "permissions": ["storage", "downloads"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://tsdr.uspto.gov/*"],
+      "js": ["src/content.jsx"]
+    }
+  ]
+}
