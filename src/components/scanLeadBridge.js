@@ -22,6 +22,5 @@ export const callScanLead = () => {
         scanLeadHandler();
         return true;
     }
-    console.warn('⚠️ scanLead abhi register nahi hua — ScanButton mount hua hai ya nahi check karo.');
     return false;
 };

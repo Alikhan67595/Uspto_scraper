@@ -1,8 +1,12 @@
 @import "tailwindcss";
 
 #root{
-    width: 300px;
-    height: 400px;
+    /* width: 300px;
+    height: 400px; */
  background-color:#0f172b;
 
+}
+
+body{
+     background-color:#0f172b;
 }

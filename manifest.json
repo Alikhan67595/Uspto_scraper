@@ -14,6 +14,10 @@
     {
       "matches": ["*://tsdr.uspto.gov/*"],
       "js": ["src/content.jsx"]
+    },
+    {
+      "matches": ["*://tsdrsec.uspto.gov/*"],
+      "js": ["src/components/tsdrsecContent.jsx"]
     }
   ]
 }

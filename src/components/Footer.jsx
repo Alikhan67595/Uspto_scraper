@@ -35,11 +35,25 @@ const Footer = () => {
         chrome.storage.local.set({ isHide: newVal })
     }
 
-    // ✅ chrome.tabs.create taake popup band hone ke bawajood naya tab
-    // reliably khulay (window.open popup context mein hamesha trust nahi hota)
-    const openDashboard = () => {
-        chrome.tabs.create({ url: DASHBOARD_URL })
+    // // ✅ chrome.tabs.create taake popup band hone ke bawajood naya tab
+    // // reliably khulay (window.open popup context mein hamesha trust nahi hota)
+    // const openDashboard = () => {
+    //     chrome.tabs.create({ url: DASHBOARD_URL })
+    // }
+
+const openDashboard = () => {
+         // Vite ke default index.html ke aage HashRouter ka path
+        const dashboardUrl = chrome.runtime.getURL("index.html#/dashboard");
+        
+        chrome.windows.create({
+            url: dashboardUrl,
+            type: "popup", // "popup" type se address bar aur bookmarks hide ho jaate hain, clean app look milti hai
+            width: 1000,
+            height: 1000
+        });
     }
+
+
 
   return (
     <div className='px-3 pb-3 pt-1 absolute bottom-0 w-full'>
