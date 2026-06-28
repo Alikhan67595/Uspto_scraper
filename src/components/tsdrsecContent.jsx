@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import TsdrsecWidget from './TsdrsecWidget.jsx';
-import './shortkey.js'; // ✅ Alt / Ctrl+Enter / Ctrl+Shift shortcuts register karne ke liye
+import './shortkey.js'; // ✅ Alt / Ctrl+Enter / Ctrl+Shift / Ctrl+/ shortcuts register karne ke liye
 
 // Yeh content script SIRF https://tsdrsec.uspto.gov/* par chalega
 // (manifest.json mein "matches" check karein)

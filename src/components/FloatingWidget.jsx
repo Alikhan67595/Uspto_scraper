@@ -38,7 +38,7 @@ const FloatingWidget = () => {
   if (isHide) {
     return (
       <div
-        className="w-[18px] h-[60px] fixed top-[300px] left-4 px-2 z-[2147483647] bg-slate-900 rounded-tr-xl rounded-br-xl cursor-pointer flex justify-center items-center select-none transition-all ease-in-out duration-500"
+        className="w-[20px] h-[60px] fixed top-[300px] left-0 px-2 z-[2147483647] bg-slate-900 rounded-tr-xl rounded-br-xl cursor-pointer flex justify-center items-center select-none transition-all ease-in-out duration-500"
         onClick={(e) => { e.stopPropagation(); toggleWidget(false) }}
       >
         <ViewIcon size="18px" className="text-white" />

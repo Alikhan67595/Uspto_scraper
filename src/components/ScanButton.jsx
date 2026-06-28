@@ -2,6 +2,33 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { registerScanLead, unregisterScanLead } from './scanLeadBridge.js';
 import { openApplicationDoc } from './Application.js';
 
+// ── Toast system (same pattern as TsdrsecWidget) ──────────────────
+let toastIdCounter = 0;
+
+const toastContainerStyle = {
+    position: 'fixed',
+    top: '20px',
+    right: '20px',
+    zIndex: 2147483647,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '8px',
+    pointerEvents: 'none',
+};
+
+const toastStyle = {
+    background: '#1e1e1e',
+    color: '#fff',
+    padding: '18px 14px',
+    borderRadius: '8px',
+    fontSize: '14px',
+    fontFamily: 'sans-serif',
+    boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+    minWidth: '220px',
+    transition: 'opacity 0.3s ease',
+};
+// ──────────────────────────────────────────────────────────────────
+
 const DATE_FIELD = {
     deadAbandoned: { regex: /Date Abandoned:\s*([A-Za-z]+\.?\s\d{1,2},\s\d{4})/i, label: "Date Abandoned" },
     deadCancelled: { regex: /Date Cancelled:\s*([A-Za-z]+\.?\s\d{1,2},\s\d{4})/i, label: "Date Cancelled" },
@@ -66,9 +93,21 @@ const ScanButton = () => {
     const [missingCount, setMissingCount]   = useState(0);
     const [status, setStatus]               = useState({ msg: "Ready", color: "white" });
     const [isHide, setIsHide]               = useState(false);
+    const [toasts, setToasts]               = useState([]);
 
     const scraperTypeRef = useRef('deadAbandoned');
     const updateStatus = (msg, color) => setStatus({ msg, color });
+
+    const showToast = (msg, color) => {
+        const id = ++toastIdCounter;
+        setToasts((prev) => [...prev, { id, msg, color, fading: false }]);
+        setTimeout(() => {
+            setToasts((prev) => prev.map((t) => (t.id === id ? { ...t, fading: true } : t)));
+        }, 2500);
+        setTimeout(() => {
+            setToasts((prev) => prev.filter((t) => t.id !== id));
+        }, 2850);
+    };
 
     const loadCounts = (type) => {
         chrome.storage.local.get([getValidKey(type), getMissingKey(type)], (res) => {
@@ -85,6 +124,7 @@ const ScanButton = () => {
             updateStatus("Opening...", "white");
             const result = openApplicationDoc();
             updateStatus(result.message, result.success ? "#4caf50" : "#ff4d4d");
+            showToast(result.message, result.success ? "#4caf50" : "#ff4d4d");
             return;
         }
 
@@ -180,7 +220,12 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
     phone = "";
 }
 
-                const email = block.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/i)?.[0] || "N/A";
+                // ✅ Saari emails nikalo, phir ek ek validate karo
+                // Blacklist: notifications/info/tmapp/uspto/trademark wali emails reject
+                const EMAIL_BLACKLIST = /notifications|info|tmapp|uspto|trademark/i;
+                const allEmails = block.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/gi) || [];
+                const validEmail = allEmails.find(e => !EMAIL_BLACKLIST.test(e));
+                const email = validEmail || "";
                 const leadDate = bodyText.match(DATE_FIELD[selectedType].regex)?.[1] || "";
 
                 if (!serial || !mark || !correspondent || !leadDate) {
@@ -275,6 +320,7 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
     if (isHide) return null;
 
     return (
+        <>
         <div className="w-full flex flex-col gap-2">
             <div className="flex flex-col text-[9px] text-center font-mono bg-slate-800 rounded py-[2px]">
                 <div className="text-slate-400">{scraperType}</div>
@@ -289,13 +335,30 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
                 onClick={scanLead}
                 className='bg-green-400 hover:bg-green-500 text-slate-900 rounded-[8px] py-[4px] font-bold cursor-pointer w-full text-[14px]'
             >
-                Scan Lead
+                Scan
             </button>
 
-            <div style={{ color: status.color, fontSize: '11px', textAlign: 'center', fontWeight: 'bold' }}>
+            <div style={{ color: status.color, fontSize: '11px', textAlign: 'left' }}>
                 {status.msg}
             </div>
         </div>
+
+        {/* Toast — sirf Application open/error ke liye */}
+        <div style={toastContainerStyle}>
+            {toasts.map((t) => (
+                <div
+                    key={t.id}
+                    style={{
+                        ...toastStyle,
+                        borderLeft: `4px solid ${t.color}`,
+                        opacity: t.fading ? 0 : 1,
+                    }}
+                >
+                    {t.msg}
+                </div>
+            ))}
+        </div>
+        </>
     );
 };
 

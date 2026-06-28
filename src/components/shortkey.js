@@ -1,5 +1,5 @@
 import { callScanLead } from './scanLeadBridge';
-import { callUpdateAll, callUpdateName, callUpdatePhone } from './tsdrsecUpdateBridge';
+import { callUpdateAll, callUpdateName, callUpdatePhone, callUpdateEmail } from './tsdrsecUpdateBridge';
 
 window.addEventListener('keydown', (e) => {
     const url = window.location.href;
@@ -22,6 +22,39 @@ window.addEventListener('keydown', (e) => {
         e.stopImmediatePropagation();
         callUpdatePhone();
         console.log('✅ Ctrl+Shift pressed — tsdrsec -> Update Phone');
+        return;
+    }
+
+    // ── tsdrsec.uspto.gov: Ctrl + / -> Update Email ──
+    if (isTsdrsecPage && e.key === '/' && e.ctrlKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        callUpdateEmail();
+        console.log('✅ Ctrl+/ pressed — tsdrsec -> Update Email');
+        return;
+    }
+
+    // ── tsdr.uspto.gov: Ctrl + / -> Status button click ──
+    if (!isTsdrsecPage && e.key === '/' && e.ctrlKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const btn = document.getElementById('statusSearch');
+        if (btn) {
+            btn.click();
+            console.log('✅ Ctrl+/ pressed — statusSearch button clicked');
+        }
+        return;
+    }
+
+    // ── Ctrl + \ -> Documents button click ──
+    if (e.key === '\\' && e.ctrlKey) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const btn = document.getElementById('documentSearch');
+        if (btn) {
+            btn.click();
+            console.log('✅ Ctrl+\\ pressed — documentSearch button clicked');
+        }
         return;
     }
 

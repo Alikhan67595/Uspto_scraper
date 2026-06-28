@@ -51,6 +51,34 @@ const extractPhone = () => {
     return phone;
 };
 
+// Email nikalna.
+// Label har form mein alag ho sakta hai — "Primary correspondence email address",
+// "Secondary correspondence email address", "Courtesy copy email addresses",
+// "PRIMARY EMAIL ADDRESS FOR CORRESPONDENCE", ya sirf "Email" — isliye koi fix
+// label match nahi karte, balki jis line mein "email" word ho usi line se
+// email pattern uthate hain. "*EMAIL ADDRESS\tXXXX" (owner ka masked email) ya
+// "NOT PROVIDED" wali lines apne aap skip ho jati hain kyunki unmein valid
+// @ pattern hota hi nahi.
+// Blacklist: notifications/info/tmapp/uspto/trademark wali emails reject —
+// (ScanButton.jsx ka EMAIL_BLACKLIST jaisa hi rule)
+const EMAIL_BLACKLIST = /notifications|info|tmapp|uspto|trademark/i;
+const EMAIL_REGEX = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-z]{2,}/i;
+
+const extractEmail = () => {
+    const bodyText = document.body.innerText;
+    const lines = bodyText.split("\n");
+
+    for (const line of lines) {
+        if (!/email/i.test(line)) continue;
+
+        const match = line.match(EMAIL_REGEX);
+        if (match && !EMAIL_BLACKLIST.test(match[0])) {
+            return match[0];
+        }
+    }
+    return "";
+};
+
 // Tamam leads_* keys (valid + missing, har type) mein se serial dhoondna.
 const findLeadBySerial = (serial, callback) => {
     chrome.storage.local.get(null, (all) => {
@@ -101,12 +129,26 @@ const saveUpdatedLead = (result, updatedLead, callback) => {
     chrome.storage.local.set({ [sourceKey]: updatedLeads }, () => callback({ moved: false }));
 };
 
-const FIELD_LABELS = { correspondent: 'Correspondent', phone: 'Phone' };
+const FIELD_LABELS = { correspondent: 'Correspondent', phone: 'Phone', email: 'Email' };
+
+// ── Toggle arrow icons (panel collapse/expand ke liye) ──
+const ChevronUpIcon = () => (
+    <svg viewBox="0 0 1024 1024" width="12" height="12" fill="currentColor">
+        <path d="M8.2 751.4c0 8.6 3.4 17.401 10 24.001 13.2 13.2 34.8 13.2 48 0l451.8-451.8 445.2 445.2c13.2 13.2 34.8 13.2 48 0s13.2-34.8 0-48L542 251.401c-13.2-13.2-34.8-13.2-48 0l-475.8 475.8c-6.8 6.8-10 15.4-10 24.2z" />
+    </svg>
+);
+
+const ChevronDownIcon = () => (
+    <svg viewBox="0 0 1024 1024" width="12" height="12" fill="currentColor">
+        <path d="M8.2 275.4c0-8.6 3.4-17.401 10-24.001 13.2-13.2 34.8-13.2 48 0l451.8 451.8 445.2-445.2c13.2-13.2 34.8-13.2 48 0s13.2 34.8 0 48L542 775.399c-13.2 13.2-34.8 13.2-48 0l-475.8-475.8c-6.8-6.8-10-15.4-10-24.199z" />
+    </svg>
+);
 
 let toastIdCounter = 0;
 
 const TsdrsecWidget = () => {
     const [isHide, setIsHide] = useState(false);
+    const [isOpen, setIsOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [toasts, setToasts] = useState([]);
 
@@ -126,19 +168,29 @@ const TsdrsecWidget = () => {
     };
 
     // ── isHide ko ScanButton ke same storage key se sync karna ──
+    // ── isOpen (panel expanded/collapsed) bhi yahin se load + sync hota hai ──
     useEffect(() => {
-        chrome.storage.local.get(['isHide'], (res) => {
+        chrome.storage.local.get(['isHide', 'isOpen'], (res) => {
             setIsHide(res.isHide ?? false);
+            setIsOpen(res.isOpen === 'true');
         });
 
         const syncHide = (changes, area) => {
             if (area !== 'local') return;
             if (changes.isHide) setIsHide(changes.isHide.newValue ?? false);
+            if (changes.isOpen) setIsOpen(changes.isOpen.newValue === 'true');
         };
 
         chrome.storage.onChanged.addListener(syncHide);
         return () => chrome.storage.onChanged.removeListener(syncHide);
     }, []);
+
+    // ── Down/Up arrow dabane par panel expand/collapse, value local storage mein save ──
+    const toggleOpen = () => {
+        const newVal = !isOpen;
+        setIsOpen(newVal);
+        chrome.storage.local.set({ isOpen: newVal ? 'true' : 'false' });
+    };
 
     const performUpdate = (fields) => {
         if (busy) return;
@@ -173,6 +225,12 @@ const TsdrsecWidget = () => {
                 else notFound.push('Phone Number');
             }
 
+            if (fields.includes('email')) {
+                const email = extractEmail();
+                if (email) updates.email = email;
+                else notFound.push('Email');
+            }
+
             if (Object.keys(updates).length === 0) {
                 showToast(`❌ ${notFound.join(' & ')} not found on page`, '#ff4d4d');
                 setBusy(false);
@@ -197,44 +255,66 @@ const TsdrsecWidget = () => {
     // ── seedha performUpdate call ho sake (DOM click() nahi) ──
     useEffect(() => {
         registerTsdrsecUpdaters({
-            updateAll:   () => performUpdate(['correspondent', 'phone']),
+            updateAll:   () => performUpdate(['correspondent', 'phone', 'email']),
             updateName:  () => performUpdate(['correspondent']),
             updatePhone: () => performUpdate(['phone']),
+            updateEmail: () => performUpdate(['email']),
         });
         return () => unregisterTsdrsecUpdaters();
     });
 
-    if (isHide) return null;
-
     return (
         <>
-            <div style={panelStyle}>
-                <div style={titleStyle}>Signatory Updater</div>
+            {!isHide && (
+                <div style={panelStyle}>
+                    <div style={headerStyle}>
+                        <span>Lead Data Updater</span>
+                        <button
+                            style={toggleBtnStyle}
+                            onClick={toggleOpen}
+                            aria-label={isOpen ? 'Collapse' : 'Expand'}
+                        >
+                            {isOpen ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                        </button>
+                    </div>
 
-                <button
-                    style={btnStyle('#27ae60')}
-                    disabled={busy}
-                    onClick={() => performUpdate(['correspondent', 'phone'])}
-                >
-                    Update All
-                </button>
+                    <button
+                        style={btnStyle('#27ae60')}
+                        disabled={busy}
+                        onClick={() => performUpdate(['correspondent', 'phone', 'email'])}
+                    >
+                        Update All
+                    </button>
 
-                <button
-                    style={btnStyle('#2980b9')}
-                    disabled={busy}
-                    onClick={() => performUpdate(['phone'])}
-                >
-                    Update Phone
-                </button>
+                    {isOpen && (
+                        <>
+                            <button
+                                style={btnStyle('#2980b9')}
+                                disabled={busy}
+                                onClick={() => performUpdate(['phone'])}
+                            >
+                                Update Phone
+                            </button>
 
-                <button
-                    style={btnStyle('#8e44ad')}
-                    disabled={busy}
-                    onClick={() => performUpdate(['correspondent'])}
-                >
-                    Update Name
-                </button>
-            </div>
+                            <button
+                                style={btnStyle('#8e44ad')}
+                                disabled={busy}
+                                onClick={() => performUpdate(['correspondent'])}
+                            >
+                                Update Name
+                            </button>
+
+                            <button
+                                style={btnStyle('#d35400')}
+                                disabled={busy}
+                                onClick={() => performUpdate(['email'])}
+                            >
+                                Update Email
+                            </button>
+                        </>
+                    )}
+                </div>
+            )}
 
             <div style={toastContainerStyle}>
                 {toasts.map((t) => (
@@ -270,12 +350,14 @@ const panelStyle = {
     fontFamily: 'sans-serif',
 };
 
-const titleStyle = {
+const headerStyle = {
     color: '#fff',
     fontSize: '12px',
     fontWeight: 'bold',
-    textAlign: 'center',
-    marginBottom: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: '2px',
 };
 
 const btnStyle = (bg) => ({
@@ -288,6 +370,22 @@ const btnStyle = (bg) => ({
     fontWeight: 'bold',
     cursor: 'pointer',
 });
+
+const toggleBtnStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '18px',
+    height: '18px',
+    padding: '0',
+    margin: '0',
+    flexShrink: 0,
+    lineHeight: 0,
+    background: 'transparent',
+    border: 'none',
+    color: '#aaa',
+    cursor: 'pointer',
+};
 
 const toastContainerStyle = {
     position: 'fixed',

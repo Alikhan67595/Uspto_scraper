@@ -3,13 +3,25 @@
   "name": "USPTO Data Scraper",
   "version": "1.0.0",
   "action": {
-    "default_popup": "index.html"
+    "default_popup": "index.html",
+    "default_icon": {
+     "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "permissions": ["storage", "downloads"],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
   },
+  "icons": {
+  "16": "icon16.png",
+  "32": "icon32.png",
+  "48": "icon48.png",
+  "128": "icon128.png"
+},
   "content_scripts": [
     {
       "matches": ["*://tsdr.uspto.gov/*"],
@@ -19,5 +31,14 @@
       "matches": ["*://tsdrsec.uspto.gov/*"],
       "js": ["src/components/tsdrsecContent.jsx"]
     }
-  ]
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://localhost:5174/*",
+      "http://localhost:*/*",
+      "https://alikhan.site/*",
+      "https://www.alikhan.site/*",
+      "https://uspto-scraper.netlify.app/*"
+    ]
+  }
 }

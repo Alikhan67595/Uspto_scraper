@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Routes, Route, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import logo from "../assets/icon128.png"
 
 // ─── Constants ───────────────────────────────────────────────
 const LEAD_TYPES = [
@@ -19,23 +20,11 @@ const DATE_LABELS = {
 const getValidKey   = (type) => `leads_${type}`;
 const getMissingKey = (type) => `leads_missing_${type}`;
 
-// Remove leads (by serial) from a given storage key
-const deleteLeadsFromStorage = (storageKey, serialsToDelete, callback) => {
-  chrome.storage.local.get([storageKey], (res) => {
-    const current = res[storageKey] || [];
-    const updated = current.filter(l => !serialsToDelete.includes(l.serial));
-    chrome.storage.local.set({ [storageKey]: updated }, () => {
-      if (callback) callback(updated);
-    });
-  });
-};
-
 // ─── Hook: real-time storage listener ────────────────────────
 function useLeadData(type, subType) {
   const [leads, setLeads] = useState([]);
   const [allCounts, setAllCounts] = useState({});
 
-  // Load counts for all types (for sidebar badges)
   const loadAllCounts = (res) => {
     const c = {};
     LEAD_TYPES.forEach(t => {
@@ -75,163 +64,236 @@ function useLeadData(type, subType) {
   return { leads, allCounts };
 }
 
-// ─── Themed Checkbox (dark, matches accent color, no native white box) ──
-function ThemedCheckbox({ checked, onChange, accentColor = '#3b82f6', className = '', style = {} }) {
-  return (
-    <label
-      className={className}
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        position: 'relative',
-        width: '16px', height: '16px', borderRadius: '4px',
-        border: `1.5px solid ${checked ? accentColor : '#334155'}`,
-        background: checked ? accentColor : '#0f172a',
-        cursor: 'pointer', flexShrink: 0,
-        transition: 'all 0.15s',
-        ...style,
-      }}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        style={{
-          position: 'absolute', width: '16px', height: '16px',
-          opacity: 0, cursor: 'pointer', margin: 0,
-        }}
-      />
-      {checked && (
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#020817" strokeWidth="3.5">
-          <path d="M20 6L9 17l-5-5" />
-        </svg>
-      )}
-    </label>
-  );
+// ─── Delete helpers ───────────────────────────────────────────
+function deleteSingleLead(type, subType, serial, callback) {
+  const key = subType === 'valid' ? getValidKey(type) : getMissingKey(type);
+  chrome.storage.local.get([key], (res) => {
+    const updated = (res[key] || []).filter(l => l.serial !== serial);
+    chrome.storage.local.set({ [key]: updated }, callback);
+  });
 }
 
-// ─── Trash Icon ─────────────────────────────────────────────
+function deleteMultipleLeads(type, subType, serials, callback) {
+  const key = subType === 'valid' ? getValidKey(type) : getMissingKey(type);
+  const set = new Set(serials);
+  chrome.storage.local.get([key], (res) => {
+    const updated = (res[key] || []).filter(l => !set.has(l.serial));
+    chrome.storage.local.set({ [key]: updated }, callback);
+  });
+}
+
+// ─── Trash Icon ───────────────────────────────────────────────
 function TrashIcon({ size = 14 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 6h18" />
-      <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6" />
-      <path d="M10 11v6M14 11v6" />
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/>
+      <path d="M10 11v6M14 11v6"/>
+      <path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/>
     </svg>
   );
 }
 
-// ─── Confirm Delete Modal ──────────────────────────────────────
-function ConfirmDeleteModal({ count, onConfirm, onCancel }) {
+// ─── Custom Checkbox ──────────────────────────────────────────
+function Checkbox({ checked, indeterminate, onChange }) {
+  const [hovered, setHovered] = React.useState(false);
+  const active = checked || indeterminate;
+
   return (
     <div
+      onClick={e => { e.stopPropagation(); onChange && onChange(e); }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(2,8,23,0.7)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        zIndex: 1000,
+        width: '15px', height: '15px', borderRadius: '4px', flexShrink: 0,
+        cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: `1.5px solid ${active ? '#3b82f6' : hovered ? '#475569' : '#2d3f55'}`,
+        background: active ? '#3b82f6' : hovered ? '#1e293b' : '#0f172a',
+        transition: 'all 0.12s ease',
+        boxShadow: active ? '0 0 0 3px #3b82f620' : hovered ? '0 0 0 3px #3b82f610' : 'none',
+        userSelect: 'none',
       }}
-      onClick={onCancel}
     >
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px',
-          padding: '22px 24px', width: '320px', boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
-          <div style={{
-            width: '32px', height: '32px', borderRadius: '8px',
-            background: '#ef444422', color: '#ef4444',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-          }}>
-            <TrashIcon size={16} />
-          </div>
-          <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#f1f5f9' }}>
-            Delete {count > 1 ? `${count} leads` : 'lead'}?
-          </h3>
-        </div>
-        <p style={{ margin: '0 0 18px', fontSize: '12px', color: '#94a3b8', lineHeight: 1.5 }}>
-          This action can't be undone. {count > 1 ? 'These leads' : 'This lead'} will be permanently removed from storage.
-        </p>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: '7px 14px', borderRadius: '8px', border: '1px solid #1e293b',
-              background: 'transparent', color: '#94a3b8', fontSize: '12px',
-              fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            style={{
-              padding: '7px 14px', borderRadius: '8px', border: 'none',
-              background: '#ef4444', color: 'white', fontSize: '12px',
-              fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      </div>
+      {indeterminate && !checked ? (
+        <div style={{ width: '7px', height: '1.5px', background: '#fff', borderRadius: '1px' }} />
+      ) : checked ? (
+        <svg width="9" height="7" viewBox="0 0 9 7" fill="none">
+          <polyline points="1,3.5 3.5,6 8,1" stroke="white" strokeWidth="1.8"
+            strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      ) : null}
     </div>
   );
 }
 
+// ─── Filter helpers ──────────────────────────────────────────
+const LLC_REGEX = /\bllc\b|l\.l\.c\.?/i;
+const INC_REGEX = /\binc\b|i\.n\.c\.?/i;
+
+// Parse "Jan. 15, 2024" or "January 15, 2024" to Date object
+function parseLeadDate(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function applyFilters(leads, filterLLC, filterINC, searchQuery, dateFrom, dateTo) {
+  return leads.filter(l => {
+    const c = l.correspondent || '';
+    if (filterLLC && !filterINC && !LLC_REGEX.test(c)) return false;
+    if (filterINC && !filterLLC && !INC_REGEX.test(c)) return false;
+    if (filterLLC && filterINC && !(LLC_REGEX.test(c) || INC_REGEX.test(c))) return false;
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      const haystack = [l.serial, l.mark, l.correspondent, l.phone, l.email, l.leadDate].join(' ').toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+
+    if (dateFrom || dateTo) {
+      const ld = parseLeadDate(l.leadDate);
+      if (!ld) return false;
+      if (dateFrom && ld < new Date(dateFrom)) return false;
+      if (dateTo && ld > new Date(dateTo + 'T23:59:59')) return false;
+    }
+
+    return true;
+  });
+}
+
+// ─── Filter Toggle Button ─────────────────────────────────────
+function FilterChip({ label, active, count, color, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: '5px',
+        padding: '4px 11px', borderRadius: '20px', border: `1px solid ${active ? color : '#1e293b'}`,
+        background: active ? color + '22' : 'transparent',
+        color: active ? color : '#475569',
+        cursor: 'pointer', fontSize: '11px', fontWeight: 600,
+        transition: 'all 0.15s',
+      }}
+      onMouseEnter={e => { if (!active) { e.currentTarget.style.borderColor = color + '55'; e.currentTarget.style.color = color + 'aa'; } }}
+      onMouseLeave={e => { if (!active) { e.currentTarget.style.borderColor = '#1e293b'; e.currentTarget.style.color = '#475569'; } }}
+    >
+      {label}
+      <span style={{
+        padding: '1px 5px', borderRadius: '8px', fontSize: '10px',
+        background: active ? color + '33' : '#ffffff08',
+        color: active ? color : '#334155',
+      }}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+// ─── Row with hover-revealed checkbox ────────────────────────
+function RowWithCheckbox({ children, isSelected, isDeleting, onToggle, isVisited, accentColor, isSearchMatch }) {
+  const [rowHovered, setRowHovered] = React.useState(false);
+  const showCheckbox = rowHovered || isSelected;
+
+  return (
+    <tr
+      style={{
+        borderBottom: '1px solid #1e293b',
+        background: isSelected ? '#1e3a5f33' : isSearchMatch ? '#1e3a5f20' : 'transparent',
+        opacity: isDeleting ? 0.4 : 1,
+        transition: 'background 0.1s, opacity 0.2s',
+        borderLeft: isVisited ? `3px solid ${accentColor}80` : '3px solid transparent',
+      }}
+      onMouseEnter={() => setRowHovered(true)}
+      onMouseLeave={() => setRowHovered(false)}
+    >
+      {/* Checkbox cell — visible on hover or when selected */}
+      <td style={{ padding: '10px 14px', width: '36px' }} onClick={e => e.stopPropagation()}>
+        <div style={{
+          opacity: showCheckbox ? 1 : 0,
+          transform: showCheckbox ? 'scale(1)' : 'scale(0.7)',
+          transition: 'opacity 0.15s, transform 0.15s',
+          pointerEvents: showCheckbox ? 'auto' : 'none',
+        }}>
+          <Checkbox checked={isSelected} onChange={onToggle} />
+        </div>
+      </td>
+      {children}
+    </tr>
+  );
+}
+
+// ─── Date input style ─────────────────────────────────────────
+const dateInputStyle = {
+  padding: '4px 8px', borderRadius: '6px',
+  border: '1px solid #1e293b', background: '#0f172a',
+  color: '#94a3b8', fontSize: '11px', cursor: 'pointer',
+  outline: 'none', fontFamily: 'inherit',
+};
+
 // ─── Table Component ─────────────────────────────────────────
 function LeadsTable({ leads, type, subType }) {
+  const [selected, setSelected] = useState(new Set());
+  const [deletingId, setDeletingId] = useState(null);
+  const [filterLLC, setFilterLLC] = useState(false);
+  const [filterINC, setFilterINC] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  // Visited serials — in-memory only, resets on page refresh
+  const [visitedSerials, setVisitedSerials] = useState(new Set());
+
   const dateLabel = DATE_LABELS[type] || 'Date';
   const accentColor = LEAD_TYPES.find(t => t.key === type)?.color || '#3b82f6';
-  const storageKey = subType === 'valid' ? getValidKey(type) : getMissingKey(type);
 
-  const [selected, setSelected] = useState(new Set());
-  const [pendingDelete, setPendingDelete] = useState(null); // { serials: [...] } | null
+  // Filtered leads
+  const filteredLeads = applyFilters(leads, filterLLC, filterINC, searchQuery, dateFrom, dateTo);
 
-  // Reset selection whenever the list we're looking at changes (type/subType switch)
-  useEffect(() => {
-    setSelected(new Set());
-  }, [type, subType]);
+  // Counts for filter chips
+  const llcCount = leads.filter(l => LLC_REGEX.test(l.correspondent || '')).length;
+  const incCount = leads.filter(l => INC_REGEX.test(l.correspondent || '')).length;
+
+  // Reset selection when leads or filters change
+  useEffect(() => { setSelected(new Set()); }, [leads, filterLLC, filterINC, searchQuery, dateFrom, dateTo]);
+
+  const allChecked  = filteredLeads.length > 0 && selected.size === filteredLeads.length;
+  const someChecked = selected.size > 0 && selected.size < filteredLeads.length;
+
+  const toggleAll = () => {
+    if (allChecked) setSelected(new Set());
+    else setSelected(new Set(filteredLeads.map(l => l.serial)));
+  };
 
   const toggleOne = (serial) => {
     setSelected(prev => {
       const next = new Set(prev);
-      if (next.has(serial)) next.delete(serial);
-      else next.add(serial);
+      next.has(serial) ? next.delete(serial) : next.add(serial);
       return next;
     });
   };
 
-  const toggleAll = () => {
-    setSelected(prev => {
-      if (prev.size === leads.length) return new Set();
-      return new Set(leads.map(l => l.serial));
-    });
+  const handleDeleteOne = (serial) => {
+    setDeletingId(serial);
+    deleteSingleLead(type, subType, serial, () => setDeletingId(null));
   };
 
-  const requestDeleteOne = (serial) => setPendingDelete({ serials: [serial] });
-  const requestDeleteSelected = () => setPendingDelete({ serials: Array.from(selected) });
-
-  const confirmDelete = () => {
-    if (!pendingDelete) return;
-    deleteLeadsFromStorage(storageKey, pendingDelete.serials, () => {
-      setSelected(prev => {
-        const next = new Set(prev);
-        pendingDelete.serials.forEach(s => next.delete(s));
-        return next;
-      });
-      setPendingDelete(null);
-    });
+  const handleDeleteSelected = () => {
+    if (selected.size === 0) return;
+    const serials = [...selected];
+    deleteMultipleLeads(type, subType, serials, () => setSelected(new Set()));
   };
+
+  const handleSerialClick = (serial) => {
+    setVisitedSerials(prev => new Set([...prev, serial]));
+  };
+
+  const clearDateFilter = () => { setDateFrom(''); setDateTo(''); };
 
   if (leads.length === 0) {
     return (
       <div style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center',
-        justifyContent: 'center', height: '300px', gap: '12px',
-        color: '#475569'
+        justifyContent: 'center', height: '300px', gap: '12px', color: '#475569'
       }}>
         <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
           <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
@@ -240,113 +302,202 @@ function LeadsTable({ leads, type, subType }) {
         <span style={{ fontSize: '14px', fontWeight: 500 }}>
           No {subType === 'valid' ? 'valid' : 'missing phone'} leads yet
         </span>
-        
+        <span style={{ fontSize: '12px', color: '#334155' }}>
+        </span>
       </div>
     );
   }
 
-  const allSelected = selected.size > 0 && selected.size === leads.length;
-
   return (
-    <div style={{ position: 'relative' }}>
-      {/* Bulk action toolbar — only visible when something is selected */}
-      {selected.size > 0 && (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* ── Sticky filter + search bar (sits right under the header above) ── */}
+      <div style={{
+        position: 'sticky', top: 'var(--leadtype-header-h, 0px)', zIndex: 10,
+        background: '#070d15',
+        borderBottom: '1px solid #1e293b',
+      }}>
+        {/* Filter chips + date range + search — sab ek hi line mein */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: '12px',
-          padding: '8px 14px', margin: '10px 14px 0',
-          background: '#ef444414', border: '1px solid #ef444444',
-          borderRadius: '8px',
+          display: 'flex', alignItems: 'center', gap: '10px',
+          padding: '8px 16px', borderBottom: '1px solid #1a2540',
+          background: '#06111e', flexWrap: 'nowrap', overflowX: 'auto',
         }}>
-          <span style={{ fontSize: '12px', color: '#f1f5f9', fontWeight: 600 }}>
-            {selected.size} selected
+          {/* Type filter label + chips */}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.5" style={{ flexShrink: 0 }}>
+            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+          </svg>
+          <span style={{ fontSize: '10px', color: '#475569', fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', flexShrink: 0 }}>
+            Filter
           </span>
-          <button
-            onClick={requestDeleteSelected}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '5px 12px', borderRadius: '7px', border: 'none',
-              background: '#ef4444', color: 'white', fontSize: '11px',
-              fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            <TrashIcon size={12} /> Delete Selected
-          </button>
-          <button
-            onClick={() => setSelected(new Set())}
-            style={{
-              padding: '5px 12px', borderRadius: '7px', border: '1px solid #334155',
-              background: 'transparent', color: '#94a3b8', fontSize: '11px',
-              fontWeight: 600, cursor: 'pointer',
-            }}
-          >
-            Clear
-          </button>
-        </div>
-      )}
+          <FilterChip label="LLC" active={filterLLC} count={llcCount} color="#a78bfa" onClick={() => setFilterLLC(v => !v)} />
+          <FilterChip label="INC" active={filterINC} count={incCount} color="#38bdf8" onClick={() => setFilterINC(v => !v)} />
 
+          {/* Divider */}
+          <div style={{ width: '1px', height: '18px', background: '#1e293b', margin: '0 2px', flexShrink: 0 }} />
+
+          {/* Date section */}
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.5" style={{ flexShrink: 0 }}>
+            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+          </svg>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+            title="From date"
+            style={dateInputStyle}
+          />
+          <span style={{ color: '#334155', fontSize: '11px', flexShrink: 0 }}>→</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+            title="To date"
+            style={dateInputStyle}
+          />
+          {(dateFrom || dateTo) && (
+            <button onClick={clearDateFilter} style={{
+              padding: '2px 8px', borderRadius: '5px',
+              border: '1px solid #1e293b', background: 'transparent',
+              color: '#64748b', cursor: 'pointer', fontSize: '10px', flexShrink: 0,
+            }}>✕</button>
+          )}
+
+          {/* Divider */}
+          <div style={{ width: '1px', height: '18px', background: '#1e293b', margin: '0 2px', flexShrink: 0 }} />
+
+          {/* Search - takes remaining space, pushed to the right */}
+          <div style={{ position: 'relative', flex: 1, minWidth: '110px', maxWidth: '280px', marginLeft: 'auto' }}>
+            <svg style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}
+              width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.5">
+              <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+            </svg>
+            <input
+              type="text"
+              placeholder="Search…"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              style={{
+                width: '100%', boxSizing: 'border-box',
+                padding: '5px 26px 5px 26px',
+                background: '#0f172a', border: `1px solid ${searchQuery ? '#3b82f6' : '#1e293b'}`,
+                borderRadius: '6px', color: '#e2e8f0', fontSize: '11px',
+                outline: 'none', fontFamily: 'inherit', transition: 'border-color 0.15s',
+              }}
+              onFocus={e => e.target.style.borderColor = '#3b82f6'}
+              onBlur={e => e.target.style.borderColor = searchQuery ? '#3b82f6' : '#1e293b'}
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} style={{
+                position: 'absolute', right: '6px', top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', color: '#475569', cursor: 'pointer',
+                fontSize: '13px', lineHeight: 1, padding: '0',
+              }}>×</button>
+            )}
+          </div>
+
+          {/* Match count — search/date/LLC/INC sab ke liye combined */}
+          {(searchQuery || dateFrom || dateTo || filterLLC || filterINC) && (
+            <span style={{ fontSize: '10px', color: '#64748b', flexShrink: 0 }}>
+              <strong style={{ color: '#e2e8f0' }}>{filteredLeads.length}</strong>/{leads.length}
+            </span>
+          )}
+
+          {/* Clear all active filters — chip, date, search sab ek saath reset */}
+          {(filterLLC || filterINC || dateFrom || dateTo || searchQuery) && (
+            <button
+              onClick={() => { setFilterLLC(false); setFilterINC(false); clearDateFilter(); setSearchQuery(''); }}
+              style={{
+                padding: '2px 9px', borderRadius: '6px', flexShrink: 0,
+                border: '1px solid #1e293b', background: 'transparent',
+                color: '#64748b', cursor: 'pointer', fontSize: '10px',
+              }}
+            >Clear</button>
+          )}
+        </div>
+
+        {/* Bulk action bar */}
+        {selected.size > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            padding: '8px 16px', background: '#1e293b',
+            borderBottom: '1px solid #334155',
+          }}>
+            <span style={{ fontSize: '12px', color: '#94a3b8' }}>
+              <strong style={{ color: '#e2e8f0' }}>{selected.size}</strong> selected
+            </span>
+            <button
+              onClick={handleDeleteSelected}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '5px',
+                padding: '4px 12px', borderRadius: '6px', border: 'none',
+                background: '#ef444422', color: '#ef4444', cursor: 'pointer',
+                fontSize: '11px', fontWeight: 600, transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#ef444433'}
+              onMouseLeave={e => e.currentTarget.style.background = '#ef444422'}
+            >
+              <TrashIcon size={12} />
+              Delete {selected.size === filteredLeads.length ? 'All' : 'Selected'}
+            </button>
+            <button onClick={() => setSelected(new Set())} style={{
+              padding: '4px 10px', borderRadius: '6px', border: '1px solid #334155',
+              background: 'transparent', color: '#64748b', cursor: 'pointer', fontSize: '11px',
+            }}>Cancel</button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Table ── */}
       <div style={{ overflowX: 'auto' }}>
-        <style>{`
-          .row-checkbox { opacity: 0; transition: opacity 0.15s; }
-          .lead-row:hover .row-checkbox,
-          .row-checkbox.is-checked { opacity: 1; }
-        `}</style>
         <table style={{
           width: '100%', borderCollapse: 'collapse', fontSize: '12px',
           fontFamily: "'JetBrains Mono', 'Fira Code', monospace"
         }}>
           <thead>
             <tr style={{ borderBottom: `2px solid ${accentColor}33` }}>
-              <th style={{ padding: '10px 14px', width: '30px' }}>
-                <ThemedCheckbox
-                  checked={allSelected}
-                  onChange={toggleAll}
-                  accentColor={accentColor}
-                />
+              <th style={{ padding: '10px 14px', width: '36px' }}>
+                <div style={{ opacity: someChecked || allChecked ? 1 : 0.25, transition: 'opacity 0.15s' }}>
+                  <Checkbox checked={allChecked} indeterminate={someChecked} onChange={toggleAll} />
+                </div>
               </th>
-              {['#', 'Serial', 'Mark', dateLabel, 'Correspondent', 'Phone', 'Email'].map(h => (
+              {['#', 'Serial', 'Mark', dateLabel, 'Correspondent', 'Phone', 'Email', ''].map(h => (
                 <th key={h} style={{
                   padding: '10px 14px', textAlign: 'left', color: '#64748b',
                   fontWeight: 600, fontSize: '10px', letterSpacing: '0.08em',
                   textTransform: 'uppercase', whiteSpace: 'nowrap'
-                }}>
-                  {h}
-                </th>
+                }}>{h}</th>
               ))}
-              <th style={{ padding: '10px 14px', width: '40px' }} />
             </tr>
           </thead>
           <tbody>
-            {leads.map((lead, i) => {
+            {filteredLeads.length === 0 ? (
+              <tr>
+                <td colSpan="9" style={{ padding: '40px', textAlign: 'center', color: '#475569', fontSize: '13px' }}>
+                  No leads match the current filter
+                </td>
+              </tr>
+            ) : filteredLeads.map((lead, i) => {
               const isSelected = selected.has(lead.serial);
+              const isDeleting = deletingId === lead.serial;
+              const isVisited  = visitedSerials.has(lead.serial);
+              const isSearchMatch = !!searchQuery;
               return (
-                <tr
+                <RowWithCheckbox
                   key={`${lead.serial}-${i}`}
-                  className="lead-row"
-                  style={{
-                    borderBottom: '1px solid #1e293b',
-                    background: isSelected ? '#ef444412' : 'transparent',
-                  }}
-                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = '#0f172a'; }}
-                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                  isSelected={isSelected}
+                  isDeleting={isDeleting}
+                  onToggle={() => toggleOne(lead.serial)}
+                  isVisited={isVisited}
+                  accentColor={accentColor}
+                  isSearchMatch={isSearchMatch}
                 >
-                  <td style={{ padding: '10px 14px' }}>
-                    <div className={`row-checkbox ${isSelected ? 'is-checked' : ''}`}>
-                      <ThemedCheckbox
-                        checked={isSelected}
-                        onChange={() => toggleOne(lead.serial)}
-                        accentColor={accentColor}
-                      />
-                    </div>
-                  </td>
-                  <td style={{ padding: '10px 14px', color: '#334155', fontSize: '11px' }}>
-                    {i + 1}
-                  </td>
+                  <td style={{ padding: '10px 14px', color: '#334155', fontSize: '11px' }}>{i + 1}</td>
                   <td style={{ padding: '10px 14px' }}>
                     <a
                       href={`https://tsdr.uspto.gov/#caseNumber=${lead.serial}&caseType=SERIAL_NO&searchType=statusSearch`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: accentColor, textDecoration: 'none', fontWeight: 600 }}
+                      target="_blank" rel="noreferrer"
+                      onClick={() => handleSerialClick(lead.serial)}
+                      style={{ color: isVisited ? '#94a3b8' : accentColor, textDecoration: 'none', fontWeight: 600 }}
                       onMouseEnter={e => e.target.style.textDecoration = 'underline'}
                       onMouseLeave={e => e.target.style.textDecoration = 'none'}
                     >
@@ -354,131 +505,113 @@ function LeadsTable({ leads, type, subType }) {
                     </a>
                   </td>
                   <td style={{ padding: '10px 14px', color: '#e2e8f0', maxWidth: '200px' }}>
-                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {lead.mark}
-                    </div>
+                    <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lead.mark}</div>
                   </td>
-                  <td style={{ padding: '10px 14px', color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                    {lead.leadDate}
-                  </td>
+                  <td style={{ padding: '10px 14px', color: '#94a3b8', whiteSpace: 'nowrap' }}>{lead.leadDate}</td>
                   <td style={{ padding: '10px 14px', color: '#cbd5e1', maxWidth: '180px' }}>
                     <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {lead.correspondent}
+                      {(filterLLC || filterINC)
+                        ? <span dangerouslySetInnerHTML={{
+                            __html: (lead.correspondent || '').replace(
+                              /(llc|l\.l\.c\.?|inc|i\.n\.c\.?)/gi,
+                              m => `<mark style="background:#7c3aed33;color:#a78bfa;border-radius:2px;padding:0 2px">${m}</mark>`
+                            )
+                          }} />
+                        : lead.correspondent}
                     </div>
                   </td>
                   <td style={{ padding: '10px 14px', whiteSpace: 'nowrap' }}>
-                    {lead.phone ? (
-                      <a
-                        href={`tel:${lead.phone}`}
-                        style={{ color: '#4ade80', textDecoration: 'none' }}
-                      >
-                        {lead.phone}
-                      </a>
-                    ) : (
-                      <span style={{ color: '#ef4444', fontSize: '11px' }}>MISSING</span>
-                    )}
+                    {lead.phone
+                      ? <a href={`tel:${lead.phone}`} style={{ color: '#4ade80', textDecoration: 'none' }}>{lead.phone}</a>
+                      : <span style={{ color: '#ef4444', fontSize: '11px' }}>MISSING</span>}
                   </td>
                   <td style={{ padding: '10px 14px', maxWidth: '200px' }}>
-                    {lead.email && lead.email !== 'N/A' ? (
-                      <a
-                        href={`mailto:${lead.email}`}
-                        style={{ color: '#60a5fa', textDecoration: 'none', fontSize: '11px' }}
-                      >
-                        {lead.email}
-                      </a>
-                    ) : (
-                      <span style={{ color: '#475569', fontSize: '11px' }}>N/A</span>
-                    )}
+                    {lead.email && lead.email !== 'N/A'
+                      ? <a href={`mailto:${lead.email}`} style={{ color: '#60a5fa', textDecoration: 'none', fontSize: '11px' }}>{lead.email}</a>
+                      : <span style={{ color: '#475569', fontSize: '11px' }}>N/A</span>}
                   </td>
-                  <td style={{ padding: '10px 14px' }}>
+                  <td style={{ padding: '10px 14px', textAlign: 'right' }}>
                     <button
-                      onClick={() => requestDeleteOne(lead.serial)}
+                      onClick={() => handleDeleteOne(lead.serial)}
+                      disabled={isDeleting}
                       title="Delete lead"
                       style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         width: '26px', height: '26px', borderRadius: '6px',
-                        border: '1px solid transparent', background: 'transparent',
-                        color: '#64748b', cursor: 'pointer', transition: 'all 0.15s',
+                        border: '1px solid #1e293b', background: 'transparent',
+                        color: '#475569', cursor: isDeleting ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.15s',
                       }}
-                      onMouseEnter={e => {
-                        e.currentTarget.style.background = '#ef444422';
-                        e.currentTarget.style.color = '#ef4444';
-                        e.currentTarget.style.borderColor = '#ef444444';
-                      }}
-                      onMouseLeave={e => {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.color = '#64748b';
-                        e.currentTarget.style.borderColor = 'transparent';
-                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = '#ef444422'; e.currentTarget.style.color = '#ef4444'; e.currentTarget.style.borderColor = '#ef444444'; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = '#475569'; e.currentTarget.style.borderColor = '#1e293b'; }}
                     >
-                      <TrashIcon />
+                      <TrashIcon size={13} />
                     </button>
                   </td>
-                </tr>
+                </RowWithCheckbox>
               );
             })}
           </tbody>
         </table>
       </div>
-
-      {pendingDelete && (
-        <ConfirmDeleteModal
-          count={pendingDelete.serials.length}
-          onConfirm={confirmDelete}
-          onCancel={() => setPendingDelete(null)}
-        />
-      )}
     </div>
   );
 }
 
-// ─── Lead Type View (with Valid / Missing sub-tabs) ───────────
+// ─── Lead Type View ───────────────────────────────────────────
 function LeadTypeView({ typeKey }) {
   const [subTab, setSubTab] = useState('valid');
   const { leads, allCounts } = useLeadData(typeKey, subTab);
   const typeInfo = LEAD_TYPES.find(t => t.key === typeKey);
   const counts = allCounts[typeKey] || { valid: 0, missing: 0 };
 
+  // Measure this header's real height so the filter bar below it
+  // (rendered inside LeadsTable) can stick right underneath it
+  // instead of both fighting over the same top:0 spot.
+  const headerRef = React.useRef(null);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const updateHeight = () => {
+      document.documentElement.style.setProperty('--leadtype-header-h', `${el.offsetHeight}px`);
+    };
+    updateHeight();
+    const ro = new ResizeObserver(updateHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [typeKey]);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
-      <div style={{
-        padding: '20px 24px 0',
-        borderBottom: '1px solid #1e293b',
-        flexShrink: 0
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div ref={headerRef} style={{
+        position: 'fixed', top: 0, left: '220px', right: 0, zIndex: 20,
+        padding: '20px 24px 0', borderBottom: '1px solid #1e293b', flexShrink: 0,
+        background: '#020817',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
           <div style={{
             width: '8px', height: '8px', borderRadius: '50%',
             background: typeInfo?.color, boxShadow: `0 0 8px ${typeInfo?.color}`
           }} />
-          <h2 style={{
-            margin: 0, fontSize: '18px', fontWeight: 700,
-            color: '#f1f5f9', letterSpacing: '-0.02em'
-          }}>
+          <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
             {typeInfo?.label}
           </h2>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '10px' }}>
             <span style={{
               fontSize: '11px', padding: '3px 10px', borderRadius: '20px',
               background: '#16a34a22', color: '#4ade80', border: '1px solid #16a34a44'
-            }}>
-              ✅ {counts.valid} valid
-            </span>
+            }}>✅ {counts.valid} valid</span>
             <span style={{
               fontSize: '11px', padding: '3px 10px', borderRadius: '20px',
               background: '#d9770622', color: '#fbbf24', border: '1px solid #d9770644'
-            }}>
-              ⚠️ {counts.missing} missing
-            </span>
+            }}>⚠️ {counts.missing} missing</span>
           </div>
         </div>
 
-        {/* Sub-tabs */}
         <div style={{ display: 'flex', gap: '0' }}>
           {[
-            { key: 'valid',   label: 'Valid Leads',   count: counts.valid   },
-            { key: 'missing', label: 'Missing Phone',  count: counts.missing },
+            { key: 'valid',   label: 'Valid Leads',  count: counts.valid   },
+            { key: 'missing', label: 'Missing Phone', count: counts.missing },
           ].map(tab => (
             <button
               key={tab.key}
@@ -509,30 +642,24 @@ function LeadTypeView({ typeKey }) {
         </div>
       </div>
 
-      {/* Table Area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0' }}>
+      <div style={{ flex: 1, position: 'relative', paddingTop: 'var(--leadtype-header-h, 0px)' }}>
         <LeadsTable leads={leads} type={typeKey} subType={subTab} />
       </div>
     </div>
   );
 }
 
-// ─── Home/Overview View ───────────────────────────────────────
+// ─── Overview ─────────────────────────────────────────────────
 function Overview({ allCounts, navigate }) {
   return (
     <div style={{ padding: '32px' }}>
-      <h2 style={{
-        margin: '0 0 6px', fontSize: '22px', fontWeight: 700,
-        color: '#f1f5f9', letterSpacing: '-0.02em'
-      }}>
+      <h2 style={{ margin: '0 0 6px', fontSize: '22px', fontWeight: 700, color: '#f1f5f9', letterSpacing: '-0.02em' }}>
         Leads Overview
       </h2>
       <p style={{ margin: '0 0 28px', color: '#475569', fontSize: '13px' }}>
-        Summary across all trademark lead types
+        Real-time summary across all trademark lead types
       </p>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px'
-      }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '14px' }}>
         {LEAD_TYPES.map(type => {
           const c = allCounts[type.key] || { valid: 0, missing: 0 };
           return (
@@ -541,49 +668,32 @@ function Overview({ allCounts, navigate }) {
               onClick={() => navigate(`/dashboard/${type.key}/valid`)}
               style={{
                 background: '#0f172a', border: `1px solid ${type.color}33`,
-                borderRadius: '12px', padding: '20px', cursor: 'pointer',
-                transition: 'all 0.2s',
+                borderRadius: '12px', padding: '20px', cursor: 'pointer', transition: 'all 0.2s',
               }}
-              onMouseEnter={e => {
-                e.currentTarget.style.borderColor = type.color + '88';
-                e.currentTarget.style.background = '#111827';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.borderColor = type.color + '33';
-                e.currentTarget.style.background = '#0f172a';
-              }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor = type.color + '88'; e.currentTarget.style.background = '#111827'; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor = type.color + '33'; e.currentTarget.style.background = '#0f172a'; }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
                 <div style={{
                   width: '28px', height: '28px', borderRadius: '8px',
-                  background: type.color + '22', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center',
-                  color: type.color, fontSize: '10px', fontWeight: 800,
-                  letterSpacing: '0.05em'
+                  background: type.color + '22', display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', color: type.color, fontSize: '10px', fontWeight: 800,
                 }}>
                   {type.badge}
                 </div>
-                <span style={{ fontWeight: 600, color: '#e2e8f0', fontSize: '14px' }}>
-                  {type.label}
-                </span>
+                <span style={{ fontWeight: 600, color: '#e2e8f0', fontSize: '14px' }}>{type.label}</span>
               </div>
               <div style={{ display: 'flex', gap: '20px' }}>
                 <div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#4ade80', lineHeight: 1 }}>
-                    {c.valid}
-                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#4ade80', lineHeight: 1 }}>{c.valid}</div>
                   <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>Valid</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#fbbf24', lineHeight: 1 }}>
-                    {c.missing}
-                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 800, color: '#fbbf24', lineHeight: 1 }}>{c.missing}</div>
                   <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>Missing</div>
                 </div>
                 <div style={{ marginLeft: 'auto', alignSelf: 'flex-end' }}>
-                  <div style={{ fontSize: '20px', fontWeight: 800, color: type.color, lineHeight: 1 }}>
-                    {c.valid + c.missing}
-                  </div>
+                  <div style={{ fontSize: '20px', fontWeight: 800, color: type.color, lineHeight: 1 }}>{c.valid + c.missing}</div>
                   <div style={{ fontSize: '10px', color: '#475569', marginTop: '3px' }}>Total</div>
                 </div>
               </div>
@@ -598,52 +708,35 @@ function Overview({ allCounts, navigate }) {
 // ─── Sidebar ─────────────────────────────────────────────────
 function Sidebar({ allCounts }) {
   const location = useLocation();
-
   return (
     <div style={{
       width: '220px', flexShrink: 0, background: '#070d15',
       borderRight: '1px solid #1e293b', display: 'flex', flexDirection: 'column',
       height: '100vh', position: 'sticky', top: 0
     }}>
-      {/* Logo */}
-      <div style={{
-        padding: '18px 16px', borderBottom: '1px solid #1e293b'
-      }}>
+      <div style={{ padding: '18px 16px', borderBottom: '1px solid #1e293b' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div style={{
-            width: '28px', height: '28px', background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+            width: '35px', height: '35px',
             borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center'
           }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5">
-              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
-              <rect x="9" y="3" width="6" height="4" rx="1"/>
-              <path d="M9 12h6M9 16h4"/>
-            </svg>
+            <img src={logo} alt="" />
           </div>
           <div>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9', lineHeight: 1 }}>
-              TM Leads
-            </div>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#f1f5f9', lineHeight: 1 }}>USPTO Leads</div>
             <div style={{ fontSize: '9px', color: '#475569', marginTop: '2px' }}>Dashboard</div>
           </div>
         </div>
       </div>
 
-      {/* Nav */}
       <nav style={{ flex: 1, padding: '10px 8px', overflowY: 'auto' }}>
-        {/* Overview link */}
-        <NavLink
-          to="/dashboard"
-          end
-          style={({ isActive }) => ({
-            display: 'flex', alignItems: 'center', gap: '8px',
-            padding: '8px 10px', borderRadius: '8px', marginBottom: '4px',
-            textDecoration: 'none', fontSize: '12px', fontWeight: 500,
-            background: isActive ? '#1e293b' : 'transparent',
-            color: isActive ? '#e2e8f0' : '#475569',
-            transition: 'all 0.15s',
-          })}
-        >
+        <NavLink to="/dashboard" end style={({ isActive }) => ({
+          display: 'flex', alignItems: 'center', gap: '8px',
+          padding: '8px 10px', borderRadius: '8px', marginBottom: '4px',
+          textDecoration: 'none', fontSize: '12px', fontWeight: 500,
+          background: isActive ? '#1e293b' : 'transparent',
+          color: isActive ? '#e2e8f0' : '#475569', transition: 'all 0.15s',
+        })}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
             <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
@@ -651,7 +744,6 @@ function Sidebar({ allCounts }) {
           Overview
         </NavLink>
 
-        {/* Divider */}
         <div style={{ margin: '8px 4px', borderTop: '1px solid #1e293b' }} />
         <div style={{ fontSize: '9px', color: '#334155', padding: '0 10px 6px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
           Lead Types
@@ -662,18 +754,14 @@ function Sidebar({ allCounts }) {
           const isActive = location.pathname.includes(`/dashboard/${type.key}`);
           return (
             <div key={type.key} style={{ marginBottom: '2px' }}>
-              <NavLink
-                to={`/dashboard/${type.key}/valid`}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '8px',
-                  padding: '8px 10px', borderRadius: '8px',
-                  textDecoration: 'none', fontSize: '12px', fontWeight: 500,
-                  background: isActive ? type.color + '18' : 'transparent',
-                  color: isActive ? type.color : '#475569',
-                  transition: 'all 0.15s',
-                  border: isActive ? `1px solid ${type.color}33` : '1px solid transparent',
-                }}
-              >
+              <NavLink to={`/dashboard/${type.key}/valid`} style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                padding: '8px 10px', borderRadius: '8px',
+                textDecoration: 'none', fontSize: '12px', fontWeight: 500,
+                background: isActive ? type.color + '18' : 'transparent',
+                color: isActive ? type.color : '#475569', transition: 'all 0.15s',
+                border: isActive ? `1px solid ${type.color}33` : '1px solid transparent',
+              }}>
                 <div style={{
                   width: '6px', height: '6px', borderRadius: '50%',
                   background: type.color, flexShrink: 0,
@@ -682,10 +770,7 @@ function Sidebar({ allCounts }) {
                 <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {type.label}
                 </span>
-                <span style={{
-                  fontSize: '10px', padding: '1px 5px', borderRadius: '8px',
-                  background: '#ffffff0a', color: '#475569'
-                }}>
+                <span style={{ fontSize: '10px', padding: '1px 5px', borderRadius: '8px', background: '#ffffff0a', color: '#475569' }}>
                   {c.valid + c.missing}
                 </span>
               </NavLink>
@@ -694,14 +779,10 @@ function Sidebar({ allCounts }) {
         })}
       </nav>
 
-      {/* Footer */}
       <div style={{ padding: '12px 16px', borderTop: '1px solid #1e293b' }}>
         <div style={{ fontSize: '10px', color: '#334155' }}>Live sync enabled</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '4px' }}>
-          <div style={{
-            width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80',
-            animation: 'pulse 2s infinite'
-          }} />
+          <div style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80', animation: 'pulse 2s infinite' }} />
           <span style={{ fontSize: '10px', color: '#4ade80' }}>Connected to storage</span>
         </div>
       </div>
@@ -715,11 +796,7 @@ const Dashboard = () => {
   const { allCounts } = useLeadData(null, null);
 
   return (
-    <div style={{
-      display: 'flex', minHeight: '100vh',
-      background: '#020817', color: '#e2e8f0',
-      fontFamily: "'Inter', system-ui, sans-serif"
-    }}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: '#020817', color: '#e2e8f0', fontFamily: "'Inter', system-ui, sans-serif" }}>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
         * { box-sizing: border-box; }
@@ -728,20 +805,16 @@ const Dashboard = () => {
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
       `}</style>
-
       <Sidebar allCounts={allCounts} />
-
-      <main style={{ flex: 1, overflow: 'auto', minWidth: 0 }}>
+      <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
         <Routes>
           <Route index element={<Overview allCounts={allCounts} navigate={navigate} />} />
           {LEAD_TYPES.map(type => (
-            <Route
-              key={type.key}
-              path={`${type.key}/:subTab`}
-              element={<LeadTypeView typeKey={type.key} />}
-            />
+            <Route key={type.key} path={`${type.key}/:subTab`} element={<LeadTypeView typeKey={type.key} />} />
           ))}
         </Routes>
+        </div>
       </main>
     </div>
   );

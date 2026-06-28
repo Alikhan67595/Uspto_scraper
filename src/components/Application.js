@@ -1,17 +1,17 @@
 // ============================================
 // Application.js - TSDR Application Doc Opener
-// Current page ke DOM se Application document link
-// nikalta hai, docId ki date check karta hai, aur
-// date ke hisaab se sahi viewer URL banata hai.
+// Finds the Application document link from the current page DOM,
+// checks the docId date, and builds the correct viewer URL.
 //
 // Rule:
-//   docId ki date >= 18 Jan 2025  -> NEW XML proxy URL (sirf serial)
-//   docId ki date <= 17 Jan 2025  -> OLD webcontent URL (serial + docId)
+//   docId date >= 18 Jan 2025  -> NEW XML proxy URL (serial only)
+//   docId date <= 17 Jan 2025  -> OLD webcontent URL (serial + docId)
 // ============================================
 
 // ── Application link keywords ──────────────
-// Har tarah ke application doc names cover karo
+// Covers all variations of application doc names
 const APP_KEYWORDS = [
+    "PR-Section 8 and 9",
     'teas plus new application',
     'teas rf new application',
     'teas standard new application',
@@ -22,18 +22,27 @@ const APP_KEYWORDS = [
 // Date boundary: 18 Jan 2025 (inclusive -> NEW url)
 const DATE_BOUNDARY = new Date(2025, 0, 18); // months are 0-indexed -> January
 
-// ── DOM se Application link dhundo ─────────
+// ── Find Application link from DOM ─────────
+// "PR-Section 8 and 9" is matched case-sensitively (exact casing in DOM).
+// All other keywords are matched case-insensitively via toLowerCase().
+const CASE_SENSITIVE_KEYWORDS = new Set(['PR-Section 8 and 9']);
+
 const findAppLinkFromDOM = () => {
     const allLinks = document.querySelectorAll('#docResultsTbody a, #docsTab a, .toggle_container a');
 
-    // Priority order mein check karo
+    // Check in priority order
     for (const keyword of APP_KEYWORDS) {
+        const caseSensitive = CASE_SENSITIVE_KEYWORDS.has(keyword);
+
         for (const a of allLinks) {
-            const text = a.textContent.trim().toLowerCase();
-            if (text === keyword || text.includes(keyword)) {
+            const rawText  = a.textContent.trim();
+            const text     = caseSensitive ? rawText : rawText.toLowerCase();
+            const needle   = caseSensitive ? keyword  : keyword.toLowerCase();
+
+            if (text === needle || text.includes(needle)) {
                 const href = a.getAttribute('href');
                 if (href && href !== 'javascript:;') {
-                    console.log(`✅ Link mila: "${a.textContent.trim()}" → ${href}`);
+                    console.log(`✅ Link found: "${rawText}" → ${href}`);
                     return href;
                 }
             }
@@ -42,7 +51,7 @@ const findAppLinkFromDOM = () => {
     return null;
 };
 
-// ── docId se date nikalo ────────────────────
+// ── Extract date from docId ─────────────────
 // docId format: <PREFIX><YYYY><MM><DD><HHMMSS>
 // e.g. APP20250118060628 -> 2025-01-18
 //      FTK20250119202902 -> 2025-01-19
@@ -60,7 +69,7 @@ const extractDateFromDocId = (docId) => {
     return new Date(year, month - 1, day);
 };
 
-// ── URL convert karo (date-based) ──────────
+// ── Build viewer URL (date-based) ──────────
 const buildViewerUrl = (href) => {
     try {
         const url = new URL(href, 'https://tsdr.uspto.gov');
@@ -74,10 +83,10 @@ const buildViewerUrl = (href) => {
         if (!docDate) return null;
 
         if (docDate >= DATE_BOUNDARY) {
-            // Naya XML proxy URL — sirf serial chahiye, doc name fixed hai
+            // New XML proxy URL — only serial needed, doc name is fixed
             return `https://tsdrsec.uspto.gov/ts/cd/tmcasedoc/pageproxy?url=/casedoc/cms/case/${serial}/tmdocument/NEWAPP0000.XML&caseid=sn${serial}`;
         } else {
-            // Purana webcontent URL — serial + asli docId chahiye
+            // Old webcontent URL — serial + original docId required
             return `https://tsdrsec.uspto.gov/ts/cd/casedoc/sn${serial}/${docId}/1/webcontent?scale=1`;
         }
     } catch (e) {
@@ -85,27 +94,27 @@ const buildViewerUrl = (href) => {
     }
 };
 
-// ── Main function ──────────────────────────
-// Page ke DOM se Application document dhoond kar, date ke hisaab se
-// sahi URL banata hai aur naye tab mein khol deta hai.
+// ── Main function ───────────────────────────
+// Finds the Application document from page DOM, builds the correct
+// URL based on date, and opens it in a new tab.
 // Returns: { success: boolean, message: string }
 export const openApplicationDoc = () => {
-    // Step 1: DOM se link nikalo
+    // Step 1: Find link from DOM
     const appHref = findAppLinkFromDOM();
 
     if (!appHref) {
-        return { success: false, message: '❌ Application link nahi mila' };
+        return { success: false, message: '❌ Application link not found' };
     }
 
-    // Step 2: Viewer URL banao (date check ke saath)
+    // Step 2: Build viewer URL (with date check)
     const viewerUrl = buildViewerUrl(appHref);
     if (!viewerUrl) {
-        return { success: false, message: '❌ URL build nahi ho saka' };
+        return { success: false, message: '❌ Failed to build viewer URL' };
     }
 
     console.log('Viewer URL:', viewerUrl);
 
-    // Step 3: New tab mein open karo
+    // Step 3: Open in new tab
     window.open(viewerUrl, '_blank');
 
     return { success: true, message: '✅ Application Opened' };

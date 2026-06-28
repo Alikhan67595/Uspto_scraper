@@ -29,7 +29,7 @@ const formatRow = (lead, type) => ({
     [DATE_LABELS[type] || "Date"]: lead.leadDate,
     "Correspondent":               lead.correspondent,
     "Phone":                       lead.phone || "MISSING",
-    "Email":                       lead.email || "N/A",
+    "Email":                       lead.email || "",
 });
 
 // ═══════════════════════════════════════════════
