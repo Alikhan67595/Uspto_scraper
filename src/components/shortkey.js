@@ -10,7 +10,7 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         e.stopImmediatePropagation();
         callUpdateName();
-        console.log('✅ Ctrl+Enter pressed — tsdrsec -> Update Name');
+        // console.log('✅ Ctrl+Enter pressed — tsdrsec -> Update Name');
         return;
     }
 
@@ -21,7 +21,7 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         e.stopImmediatePropagation();
         callUpdatePhone();
-        console.log('✅ Ctrl+Shift pressed — tsdrsec -> Update Phone');
+        // console.log('✅ Ctrl+Shift pressed — tsdrsec -> Update Phone');
         return;
     }
 
@@ -30,7 +30,7 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         e.stopImmediatePropagation();
         callUpdateEmail();
-        console.log('✅ Ctrl+/ pressed — tsdrsec -> Update Email');
+        // console.log('✅ Ctrl+/ pressed — tsdrsec -> Update Email');
         return;
     }
 
@@ -41,7 +41,7 @@ window.addEventListener('keydown', (e) => {
         const btn = document.getElementById('statusSearch');
         if (btn) {
             btn.click();
-            console.log('✅ Ctrl+/ pressed — statusSearch button clicked');
+            // console.log('✅ Ctrl+/ pressed — statusSearch button clicked');
         }
         return;
     }
@@ -53,7 +53,7 @@ window.addEventListener('keydown', (e) => {
         const btn = document.getElementById('documentSearch');
         if (btn) {
             btn.click();
-            console.log('✅ Ctrl+\\ pressed — documentSearch button clicked');
+            // console.log('✅ Ctrl+\\ pressed — documentSearch button clicked');
         }
         return;
     }
@@ -65,7 +65,7 @@ window.addEventListener('keydown', (e) => {
             const btn = document.getElementById('documentSearch');
             if (btn) {
                 btn.click();
-                console.log('✅ Enter pressed — URL: documentSearch -> Documents button clicked');
+                // console.log('✅ Enter pressed — URL: documentSearch -> Documents button clicked');
             }
         } else if (url.includes('statusSearch')) {
             e.preventDefault();
@@ -73,7 +73,7 @@ window.addEventListener('keydown', (e) => {
             const btn = document.getElementById('statusSearch');
             if (btn) {
                 btn.click();
-                console.log('✅ Enter pressed — URL: statusSearch -> Status button clicked');
+                // console.log('✅ Enter pressed — URL: statusSearch -> Status button clicked');
             }
         }
         return;
@@ -88,10 +88,10 @@ window.addEventListener('keydown', (e) => {
 
         if (isTsdrsecPage) {
             callUpdateAll(); // ✅ widget hidden ho tab bhi chalega — bridge se direct call
-            console.log('✅ Alt pressed — tsdrsec -> Update All');
+            // console.log('✅ Alt pressed — tsdrsec -> Update All');
         } else {
             callScanLead(); // ✅ scanLeadBridge se seedha import karke call karo (DOM click() nahi)
-            console.log('✅ Alt pressed — Scan Lead');
+            // console.log('✅ Alt pressed — Scan Lead');
         }
 
         return;

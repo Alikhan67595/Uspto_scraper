@@ -17,6 +17,10 @@ const getSerialFromUrl = () => {
     return match ? match[1] : null;
 };
 
+// Placeholder values (e.g. "NOT PROVIDED", "N/A", "NONE", "XXXX") ko reject
+// karne ke liye — yeh kabhi bhi real data ke taur par save nahi hone chahiye.
+const PLACEHOLDER_REGEX = /^(not\s*provided|n\/?a|none|x{2,})$/i;
+
 // Signatory Name nikalna.
 // Label kuch bhi ho sakta hai: "SIGNATORY NAME" / "SIGNATORY'S NAME" /
 // "Signatory's name" / "Signatory name" — sab match ho jayenge.
@@ -24,31 +28,114 @@ const extractSignatoryName = () => {
     const bodyText = document.body.innerText;
     const raw = bodyText.match(/Signatory(?:['’]s)?\s+Name\s*[:\t]\s*([^\n\t]+)/i)?.[1];
     if (!raw) return "";
-    return raw.replace(/\s+/g, " ").trim();
+
+    const cleaned = raw.replace(/\s+/g, " ").trim();
+    if (!cleaned || PLACEHOLDER_REGEX.test(cleaned)) return "";
+
+    return cleaned;
 };
 
 // Phone Number nikalna.
 // Pehle "Signatory's Phone Number" / "Signatory Phone Number" try karo.
 // Agar woh na mile to "Primary telephone number" ko fallback ke taur par use karo.
-const extractPhone = () => {
-    const bodyText = document.body.innerText;
 
-    let segment = bodyText.match(/Signatory(?:['’]s)?\s+Phone\s+Number\s*[:\t]\s*([^\n]+)/i)?.[1];
+// ── USA-only phone validation ───────────────────────────────
+// Sirf USA number chahiye:
+//   - 10 digits (bina country code) → valid
+//   - 11 digits jo "1" se start hon (US country code) → valid, leading 1 hata do
+//   - koi bhi aur case (dusra country code jaisa +86/+91, 11 digits jo 1 se
+//     start na hon, 12+ digits, masked "XXX-XXX-XXXX", waghera) → INVALID
+// ── Toll-free prefixes reject karne ke liye — ye office/business lines hoti
+// hain, kisi individual ka personal number nahi, isliye lead ke liye bekaar
+const TOLL_FREE_PREFIXES = ['800', '833', '844', '855', '866', '877', '888'];
 
-    if (!segment) {
-        segment = bodyText.match(/Primary\s+telephone\s+number\s*[:\t]\s*([^\n]+)/i)?.[1];
+const extractValidPhoneFromSegment = (segment) => {
+    if (!segment) return "";
+    // sirf pehli line lo — baad ki lines mein address/fax ka data nahi ana chahiye
+    const firstLine = segment.trim().split("\n")[0].trim();
+    if (!firstLine || PLACEHOLDER_REGEX.test(firstLine)) return "";
+
+    // ✅ Layer 1: "(" wale area code ko anchor bana ke sirf wahi block nikalo —
+    // extension chahe number se PEHLE ho ("101ext1-(336) 757-1222") ya BAAD mein
+    // ("1-(336) 757-1222x101"), extension ke digits mein kabhi literal "(" nahi
+    // hota isliye ye pattern khud hi extension ko ignore kar deta hai
+    const parenMatch = firstLine.match(/(1[-.\s]?)?\(\d{3}\)[-.\s]*\d{3}[-.\s]*\d{4}/);
+
+    let digitsOnly;
+    if (parenMatch) {
+        // ✅ Match se pehle jo bhi text hai usko check karo — agar usme digit
+        // hai lekin wo extension marker (x101, ext101) nahi hai, to ye kisi
+        // FOREIGN country code ka hissa hai (e.g. "86-1 (566) 905-6568" is
+        // actually a China +86 number, "1 (566)..." sirf coincidence se US
+        // jaisa dikh raha hai) — reject karo
+        const beforeMatch = firstLine.slice(0, parenMatch.index);
+        const isExtensionPrefix = /\d+\s*(?:x|ext\.?|extension)\.?\s*$/i.test(beforeMatch);
+        if (/\d/.test(beforeMatch) && !isExtensionPrefix) {
+            return ""; // foreign country code prefix — reject
+        }
+        digitsOnly = parenMatch[0].replace(/\D/g, "");
+    } else {
+        // ✅ Layer 2: fallback jab "(" na ho — extension ko line ke start ya
+        // end se strip karo, phir jo bache us se digits nikalo
+        const noExt = firstLine
+            .replace(/^\s*\d{1,8}\s*(?:x|ext\.?|extension)\.?\s*/i, "")
+            .replace(/\s*(?:x|ext\.?|extension)\.?\s*\d{1,8}\s*$/i, "");
+        digitsOnly = noExt.replace(/\D/g, "");
     }
 
-    if (!segment) return "";
+    let tenDigits = "";
+    if (digitsOnly.length === 10) {
+        tenDigits = digitsOnly;
+    } else if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
+        tenDigits = digitsOnly.slice(1);
+    } else {
+        return ""; // invalid — wrong country code, extension, ya galat digit count
+    }
 
-    const match = segment.match(/(?:1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/);
-    if (!match) return "";
+    if (TOLL_FREE_PREFIXES.includes(tenDigits.slice(0, 3))) {
+        return ""; // toll-free — reject
+    }
 
-    const phone = match[0].trim();
+    return `${tenDigits.slice(0, 3)}-${tenDigits.slice(3, 6)}-${tenDigits.slice(6)}`;
+};
 
-    if (phone.replace(/\D/g, "").length < 10) return "";
+// Returns { phone, invalidFound } — invalidFound true hota hai jab koi
+// label mila aur usmein digits bhi thay, magar wo USA format mein fit
+// nahi hue (dusra country code, galat digit count, waghera).
+const extractPhone = () => {
+    const bodyText = document.body.innerText;
+    let sawDigitsButInvalid = false;
 
-    return phone;
+    const tryLabel = (regex) => {
+        const segment = bodyText.match(regex)?.[1];
+        if (!segment) return "";
+        const phone = extractValidPhoneFromSegment(segment);
+        if (!phone) {
+            const digits = segment.trim().split("\n")[0].replace(/\D/g, "");
+            if (digits.length > 0) sawDigitsButInvalid = true;
+        }
+        return phone;
+    };
+
+    // 1) "Signatory's Phone Number" — USPTO yahan aksar number ko
+    //    "XXX-XXX-XXXX" se mask kar deta hai, isliye match milne ke
+    //    bawajood digits na ho to agle label par fall through karte hain.
+    let phone = tryLabel(/Signatory(?:['’]s)?\s+Phone\s+Number\s*[:\t]\s*([^\n]+)/i);
+    if (phone) return { phone, invalidFound: false };
+
+    // 2) "Primary telephone number"
+    phone = tryLabel(/Primary\s+telephone\s+number\s*[:\t]\s*([^\n]+)/i);
+    if (phone) return { phone, invalidFound: false };
+
+    // 3) Section 8/9 (aur waisi hi TEAS filing receipt) pages par "Signatory's
+    //    Phone Number" / "Primary telephone number" jaisa koi label nahi hota —
+    //    sirf "OWNER SECTION (current)" ke neeche plain "PHONE" label hota hai.
+    //    \bPHONE\b isliye "TELEPHONE" jaise words ke beech match nahi karega,
+    //    aur "FAX" ko bhi touch nahi karega kyunke wo alag label hai.
+    phone = tryLabel(/\bPHONE\b\s*[:\t]?\s*([^\n]+)/i);
+    if (phone) return { phone, invalidFound: false };
+
+    return { phone: "", invalidFound: sawDigitsButInvalid };
 };
 
 // Email nikalna.
@@ -192,7 +279,7 @@ const TsdrsecWidget = () => {
         chrome.storage.local.set({ isOpen: newVal ? 'true' : 'false' });
     };
 
-    const performUpdate = (fields) => {
+    const performUpdate = async (fields) => {
         if (busy) return;
         setBusy(true);
 
@@ -220,9 +307,9 @@ const TsdrsecWidget = () => {
             }
 
             if (fields.includes('phone')) {
-                const phone = extractPhone();
+                const { phone, invalidFound } = extractPhone();
                 if (phone) updates.phone = phone;
-                else notFound.push('Phone Number');
+                else notFound.push(invalidFound ? 'Phone Number (Invalid — non-USA/format)' : 'Phone Number');
             }
 
             if (fields.includes('email')) {

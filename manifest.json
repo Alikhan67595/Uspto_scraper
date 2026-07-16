@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "USPTO Data Scraper",
-  "version": "1.0.0",
+  "version": "1.0.2",
+  "description": "Extract trademark serials, marks, dates & correspondent contact info from USPTO TSDR — export to Excel instantly.",
   "action": {
     "default_popup": "index.html",
     "default_icon": {

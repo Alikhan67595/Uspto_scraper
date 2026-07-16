@@ -27,30 +27,6 @@ const DATE_BOUNDARY = new Date(2025, 0, 18); // months are 0-indexed -> January
 // All other keywords are matched case-insensitively via toLowerCase().
 const CASE_SENSITIVE_KEYWORDS = new Set(['PR-Section 8 and 9']);
 
-const findAppLinkFromDOM = () => {
-    const allLinks = document.querySelectorAll('#docResultsTbody a, #docsTab a, .toggle_container a');
-
-    // Check in priority order
-    for (const keyword of APP_KEYWORDS) {
-        const caseSensitive = CASE_SENSITIVE_KEYWORDS.has(keyword);
-
-        for (const a of allLinks) {
-            const rawText  = a.textContent.trim();
-            const text     = caseSensitive ? rawText : rawText.toLowerCase();
-            const needle   = caseSensitive ? keyword  : keyword.toLowerCase();
-
-            if (text === needle || text.includes(needle)) {
-                const href = a.getAttribute('href');
-                if (href && href !== 'javascript:;') {
-                    console.log(`✅ Link found: "${rawText}" → ${href}`);
-                    return href;
-                }
-            }
-        }
-    }
-    return null;
-};
-
 // ── Extract date from docId ─────────────────
 // docId format: <PREFIX><YYYY><MM><DD><HHMMSS>
 // e.g. APP20250118060628 -> 2025-01-18
@@ -69,6 +45,90 @@ const extractDateFromDocId = (docId) => {
     return new Date(year, month - 1, day);
 };
 
+// ── Find Application link from DOM (best-match scoring) ───
+// Instead of returning the FIRST link whose text merely contains a keyword
+// (which can wrongly grab some unrelated row before the real Application
+// row is reached), we score every link against every keyword and pick the
+// single best match overall:
+//   - lower keyword index (earlier in APP_KEYWORDS) = higher priority
+//   - exact text match beats substring/"includes" match
+//   - among ties, the EARLIEST docId date wins
+// We do NOT assume anything about the docId format/prefix (it can be APP,
+// REV, NEWAPP, REG, RFA, etc. depending on doc type) — text matching is
+// based purely on the link's visible text/description.
+//
+// Why "earliest date" matters: the real Application is always the FIRST
+// document ever filed in a case. Other later documents (responses,
+// amendments, RFA filings, revivals, etc.) can ALSO contain the word
+// "application" in their description and would otherwise win the keyword
+// match purely by DOM order — picking the earliest-dated candidate avoids
+// that trap.
+const findAppLinkFromDOM = () => {
+    const allLinks = document.querySelectorAll('#docResultsTbody a, #docsTab a, .toggle_container a');
+
+    let best = null; // { keywordIndex, exact, docDate, href, rawText }
+
+    for (const a of allLinks) {
+        const href = a.getAttribute('href');
+        if (!href || href === 'javascript:;') continue;
+
+        const rawText = a.textContent.trim();
+        if (!rawText) continue;
+
+        for (let i = 0; i < APP_KEYWORDS.length; i++) {
+            const keyword = APP_KEYWORDS[i];
+            const caseSensitive = CASE_SENSITIVE_KEYWORDS.has(keyword);
+            const text   = caseSensitive ? rawText : rawText.toLowerCase();
+            const needle = caseSensitive ? keyword : keyword.toLowerCase();
+
+            const isExact = text === needle;
+            const isMatch = isExact || text.includes(needle);
+            if (!isMatch) continue;
+
+            // Pull the docId date (if any) purely as a tie-breaker signal.
+            let docDate = null;
+            try {
+                const u = new URL(href, 'https://tsdr.uspto.gov');
+                docDate = extractDateFromDocId(u.searchParams.get('docId'));
+            } catch (e) {
+                docDate = null;
+            }
+
+            const candidate = { keywordIndex: i, exact: isExact, docDate, href, rawText };
+
+            if (!best) {
+                best = candidate;
+            } else if (candidate.keywordIndex < best.keywordIndex) {
+                best = candidate;
+            } else if (candidate.keywordIndex === best.keywordIndex) {
+                if (candidate.exact && !best.exact) {
+                    best = candidate;
+                } else if (candidate.exact === best.exact) {
+                    // Same priority & same exactness — prefer the earlier-dated doc.
+                    if (candidate.docDate && best.docDate) {
+                        if (candidate.docDate < best.docDate) best = candidate;
+                    } else if (candidate.docDate && !best.docDate) {
+                        best = candidate; // prefer a dated candidate over an undated one
+                    }
+                }
+            }
+            break; // this link already matched its best-fitting keyword, move to next link
+        }
+    }
+
+    if (best) {
+        // console.log(`✅ Link found: "${best.rawText}" → ${best.href}`);
+        return best.href;
+    }
+    return null;
+};
+
+// docId prefixes that must ALWAYS use the OLD webcontent URL, regardless of
+// date — the date-based NEW/OLD rule doesn't apply to these doc types.
+// e.g. "S89" (PR-Section 8 and 9 filings) keeps using the old format even
+// when its docId date is after the 18-Jan-2025 boundary.
+const ALWAYS_OLD_PREFIXES = ['S89'];
+
 // ── Build viewer URL (date-based) ──────────
 const buildViewerUrl = (href) => {
     try {
@@ -78,6 +138,14 @@ const buildViewerUrl = (href) => {
         if (!caseId || !docId) return null;
 
         const serial = caseId.replace(/^sn/i, '');
+
+        const forceOld = ALWAYS_OLD_PREFIXES.some(prefix =>
+            docId.toUpperCase().startsWith(prefix)
+        );
+
+        if (forceOld) {
+            return `https://tsdrsec.uspto.gov/ts/cd/casedoc/sn${serial}/${docId}/1/webcontent?scale=1`;
+        }
 
         const docDate = extractDateFromDocId(docId);
         if (!docDate) return null;
@@ -112,7 +180,7 @@ export const openApplicationDoc = () => {
         return { success: false, message: '❌ Failed to build viewer URL' };
     }
 
-    console.log('Viewer URL:', viewerUrl);
+    // console.log('Viewer URL:', viewerUrl);
 
     // Step 3: Open in new tab
     window.open(viewerUrl, '_blank');

@@ -17,15 +17,100 @@ const toastContainerStyle = {
 };
 
 const toastStyle = {
-    background: '#1e1e1e',
-    color: '#fff',
-    padding: '18px 14px',
-    borderRadius: '8px',
-    fontSize: '14px',
-    fontFamily: 'sans-serif',
-    boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+    background: '#12161C',
+    color: '#E6E8EB',
+    padding: '12px 14px',
+    borderRadius: '10px',
+    fontSize: '13px',
+    fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+    border: '1px solid #1E232A',
     minWidth: '220px',
     transition: 'opacity 0.3s ease',
+};
+// ──────────────────────────────────────────────────────────────────
+
+// ── Main widget styles — inline (Tailwind classes purge ho rahe the
+// build mein, isliye button/card transparent dikh raha tha) ──────
+const wrapStyle = {
+    display: 'flex',
+    width: '100%',
+    flexDirection: 'column',
+    gap: '8px',
+};
+
+const cardStyle = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    borderRadius: '8px',
+    border: '1px solid #1E232A',
+    backgroundColor: '#12161C',
+    padding: '7px 8px',
+};
+
+const typeLabelStyle = {
+    textAlign: 'center',
+    fontSize: '9px',
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    color: '#8B95A1',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+};
+
+const countsRowStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+};
+
+const countItemStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px',
+};
+
+const dotStyle = {
+    height: '6px',
+    width: '6px',
+    borderRadius: '9999px',
+};
+
+const countTextStyle = {
+    fontFamily: 'ui-monospace, monospace',
+    fontSize: '12px',
+    fontWeight: 600,
+};
+
+const dividerStyle = {
+    height: '14px',
+    width: '1px',
+    backgroundColor: '#1E232A',
+};
+
+const scanButtonStyle = {
+    width: '100%',
+    cursor: 'pointer',
+    borderRadius: '8px',
+    border: 'none',
+    background: 'linear-gradient(to bottom, #E8C46B, #C99A2E)',
+    padding: '7px 0',
+    fontSize: '13px',
+    fontWeight: 700,
+    color: '#1A1200',
+    boxShadow: '0 2px 0 rgba(0,0,0,0.28)',
+    transition: 'transform 0.1s ease, box-shadow 0.1s ease',
+};
+
+const statusLineStyle = {
+    fontSize: '10.5px',
+    lineHeight: 1.2,
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
 };
 // ──────────────────────────────────────────────────────────────────
 
@@ -60,6 +145,66 @@ const CONFLICT_FIELDS = {
 const getValidKey   = (type) => `leads_${type}`;
 const getMissingKey = (type) => `leads_missing_${type}`;
 
+// ── USA-only phone validation ───────────────────────────────
+// Sirf USA number chahiye:
+//   - 10 digits (bina country code) → valid
+//   - 11 digits jo "1" se start hon (US country code) → valid, leading 1 hata do
+//   - koi bhi aur case (dusra country code jaisa +86/+91, 11 digits jo 1 se
+//     start na hon, 12+ digits, waghera) → INVALID, empty string return
+// ── Toll-free prefixes reject karne ke liye — ye office/business lines hoti
+// hain, kisi individual ka personal number nahi, isliye lead ke liye bekaar
+const TOLL_FREE_PREFIXES = ['800', '833', '844', '855', '866', '877', '888'];
+
+const extractUSPhone = (segment) => {
+    if (!segment) return "";
+    // sirf pehli line lo — baad ki lines mein address/fax ka data nahi ana chahiye
+    const firstLine = segment.trim().split("\n")[0].trim();
+    if (!firstLine) return "";
+
+    // ✅ Layer 1: "(" wale area code ko anchor bana ke sirf wahi block nikalo —
+    // extension chahe number se PEHLE ho ("101ext1-(336) 757-1222") ya BAAD mein
+    // ("1-(336) 757-1222x101"), extension ke digits mein kabhi literal "(" nahi
+    // hota isliye ye pattern khud hi extension ko ignore kar deta hai
+    const parenMatch = firstLine.match(/(1[-.\s]?)?\(\d{3}\)[-.\s]*\d{3}[-.\s]*\d{4}/);
+
+    let digitsOnly;
+    if (parenMatch) {
+        // ✅ Match se pehle jo bhi text hai usko check karo — agar usme digit
+        // hai lekin wo extension marker (x101, ext101) nahi hai, to ye kisi
+        // FOREIGN country code ka hissa hai (e.g. "86-1 (566) 905-6568" is
+        // actually a China +86 number, "1 (566)..." sirf coincidence se US
+        // jaisa dikh raha hai) — reject karo
+        const beforeMatch = firstLine.slice(0, parenMatch.index);
+        const isExtensionPrefix = /\d+\s*(?:x|ext\.?|extension)\.?\s*$/i.test(beforeMatch);
+        if (/\d/.test(beforeMatch) && !isExtensionPrefix) {
+            return ""; // foreign country code prefix — reject
+        }
+        digitsOnly = parenMatch[0].replace(/\D/g, "");
+    } else {
+        // ✅ Layer 2: fallback jab "(" na ho — extension ko line ke start ya
+        // end se strip karo, phir jo bache us se digits nikalo
+        const noExt = firstLine
+            .replace(/^\s*\d{1,8}\s*(?:x|ext\.?|extension)\.?\s*/i, "")
+            .replace(/\s*(?:x|ext\.?|extension)\.?\s*\d{1,8}\s*$/i, "");
+        digitsOnly = noExt.replace(/\D/g, "");
+    }
+
+    let tenDigits = "";
+    if (digitsOnly.length === 10) {
+        tenDigits = digitsOnly;
+    } else if (digitsOnly.length === 11 && digitsOnly.startsWith("1")) {
+        tenDigits = digitsOnly.slice(1);
+    } else {
+        return ""; // invalid — wrong country code, extension, ya galat digit count
+    }
+
+    if (TOLL_FREE_PREFIXES.includes(tenDigits.slice(0, 3))) {
+        return ""; // toll-free — reject
+    }
+
+    return `${tenDigits.slice(0, 3)}-${tenDigits.slice(3, 6)}-${tenDigits.slice(6)}`;
+};
+
 const BADGE_ID = "scan-status-badge";
 
 const updateCaptionBadge = (captionDiv, msg, color) => {
@@ -91,7 +236,7 @@ const ScanButton = () => {
     const [scraperType, setScraperType]     = useState('deadAbandoned');
     const [validCount, setValidCount]       = useState(0);
     const [missingCount, setMissingCount]   = useState(0);
-    const [status, setStatus]               = useState({ msg: "Ready", color: "white" });
+    const [status, setStatus]               = useState({ msg: "Ready", color: "#8B95A1" });
     const [isHide, setIsHide]               = useState(false);
     const [toasts, setToasts]               = useState([]);
 
@@ -116,20 +261,20 @@ const ScanButton = () => {
         });
     };
 
-    const scanLead = useCallback(() => {
+    const scanLead = useCallback(async () => {
         const currentUrl = window.location.href;
 
         // ── documentSearch page par hain to Application doc khol do ──
         if (currentUrl.includes('documentSearch')) {
-            updateStatus("Opening...", "white");
+            updateStatus("Opening...", "#8B95A1");
             const result = openApplicationDoc();
-            updateStatus(result.message, result.success ? "#4caf50" : "#ff4d4d");
-            showToast(result.message, result.success ? "#4caf50" : "#ff4d4d");
+            updateStatus(result.message, result.success ? "#34D399" : "#F87171");
+            showToast(result.message, result.success ? "#34D399" : "#F87171");
             return;
         }
 
         // ── statusSearch (ya koi aur) page par normal scan-lead chalega ──
-        updateStatus("Scanning...", "white");
+        updateStatus("Scanning...", "#E8C46B");
 
         let targetSpan = null;
         let attorneyCaptionDiv = null;
@@ -167,8 +312,8 @@ const ScanButton = () => {
             // Attorney check
             const isNone = /Attorney of Record\s*-\s*(None|NONE|Pro Se)/i.test(bodyText);
             if (!isNone) {
-                updateStatus("❌ Invalid", "#ff4d4d");
-                updateCaptionBadge(attorneyCaptionDiv, "❌ Invalid", "#ff4d4d");
+                updateStatus("❌ Invalid", "#F87171");
+                updateCaptionBadge(attorneyCaptionDiv, "❌ Invalid", "#F87171");
                 if (targetSpan) targetSpan.style.backgroundColor = "#ffcccc";
                 return;
             }
@@ -180,8 +325,8 @@ const ScanButton = () => {
                 for (const [type, regex] of Object.entries(PAGE_STATUS_MAP)) {
                     if (regex.test(bodyText)) { actualStatus = type; break; }
                 }
-                updateStatus(`❌ Mismatch Lead Type`, "#ff4d4d");
-                updateCaptionBadge(attorneyCaptionDiv, "❌ Mismatch Lead Type", "#ff4d4d");
+                updateStatus(`❌ Mismatch Lead Type`, "#F87171");
+                updateCaptionBadge(attorneyCaptionDiv, "❌ Mismatch Lead Type", "#F87171");
                 if (targetSpan) targetSpan.style.backgroundColor = "#ffcccc";
                 return;
             }
@@ -190,8 +335,8 @@ const ScanButton = () => {
             const conflicts = CONFLICT_FIELDS[selectedType] || [];
             const conflictHit = conflicts.find(c => c.regex.test(bodyText));
             if (conflictHit) {
-                updateStatus(`❌ Invalid: ${conflictHit.label} found`, "#ff4d4d");
-                updateCaptionBadge(attorneyCaptionDiv, `❌ Invalid: ${conflictHit.label} found`, "#ff4d4d");
+                updateStatus(`❌ Invalid: ${conflictHit.label} found`, "#F87171");
+                updateCaptionBadge(attorneyCaptionDiv, `❌ Invalid: ${conflictHit.label} found`, "#F87171");
                 if (targetSpan) targetSpan.style.backgroundColor = "#ffcccc";
                 return;
             }
@@ -208,17 +353,17 @@ const ScanButton = () => {
                 const block = bodyText.split(/Correspondent Name\/Address:/i)[1] || "";
                 const correspondent = block.split("\n").find(l => l.trim())?.trim() || "";
 
-                // ✅ FIX — sirf "Phone:" label ke baad se number uthao
+                // ✅ sirf "Phone:" label ke baad se number uthao
                 // poore block se match karne par address ke numbers (103-169) aa jaate the
-                // ✅ FIX — sirf digits/dashes/dots/parens lo, extension (x111) aur baad ka text ignore karo
                 const phoneSegment = block.match(/Phone:\s*([\s\S]*?)(?=Fax:|Correspondent e-mail:|$)/i)?.[1] || "";
-const phoneMatches = phoneSegment.match(/(?:1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/g) || [];
-let phone = phoneMatches.length ? phoneMatches[0].trim() : "";
+                // ✅ USA-only validation — dusre country code (+86, +91, etc.) ya
+                // 10 se zyada digits (jab tak 11 digits ka leading "1" na ho) reject
+                let phone = extractUSPhone(phoneSegment);
 
-// safety net — agar kisi wajah se 10 digits se kam aaye, to reject karo
-if (phone && phone.replace(/\D/g, "").length < 10) {
-    phone = "";
-}
+                // ✅ Detect "number mila magar invalid tha" (non-USA / galat digit count)
+                // vs "number tha hi nahi" — taake status message sahi bole
+                const rawPhoneDigits = (phoneSegment.trim().split("\n")[0] || "").replace(/\D/g, "");
+                const invalidPhoneFound = !phone && rawPhoneDigits.length > 0;
 
                 // ✅ Saari emails nikalo, phir ek ek validate karo
                 // Blacklist: notifications/info/tmapp/uspto/trademark wali emails reject
@@ -229,10 +374,10 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
                 const leadDate = bodyText.match(DATE_FIELD[selectedType].regex)?.[1] || "";
 
                 if (!serial || !mark || !correspondent || !leadDate) {
-                    updateStatus("❌ Missing Data", "#ffeb3b");
-                    updateCaptionBadge(attorneyCaptionDiv, "❌ Missing Data", "#ffeb3b");
+                    updateStatus("❌ Missing Data", "#FBBF24");
+                    updateCaptionBadge(attorneyCaptionDiv, "❌ Missing Data", "#FBBF24");
                     if (targetSpan) targetSpan.style.backgroundColor = "#FFFF1FFF";
-                    console.log("Validation Failed:", { serial, mark, correspondent, leadDate });
+                    // console.log("Validation Failed:", { serial, mark, correspondent, leadDate });
                     return;
                 }
 
@@ -247,8 +392,8 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
                     missingLeads.some(l => l.serial === serial);
 
                 if (alreadyExists) {
-                    updateStatus("ℹ️ Already Exist", "#3498db");
-                    updateCaptionBadge(attorneyCaptionDiv, "ℹ️ Already Exist", "#3498db");
+                    updateStatus("ℹ️ Already Exist", "#38BDF8");
+                    updateCaptionBadge(attorneyCaptionDiv, "ℹ️ Already Exist", "#38BDF8");
                     if (targetSpan) targetSpan.style.backgroundColor = "#add8e6";
                     return;
                 }
@@ -257,23 +402,24 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
                     const updated = [...validLeads, newEntry];
                     chrome.storage.local.set({ [validKey]: updated }, () => {
                         setValidCount(updated.length);
-                        updateStatus("✅ Saved!", "#4caf50");
-                        updateCaptionBadge(attorneyCaptionDiv, "✅ Saved!", "#4caf50");
+                        updateStatus("✅ Saved!", "#34D399");
+                        updateCaptionBadge(attorneyCaptionDiv, "✅ Saved!", "#34D399");
                         if (targetSpan) targetSpan.style.backgroundColor = "#ccffcc";
                     });
                 } else {
                     const updated = [...missingLeads, newEntry];
+                    const label = invalidPhoneFound ? "⚠️ Saved (Invalid Number)" : "⚠️ Saved (No Phone)";
                     chrome.storage.local.set({ [missingKey]: updated }, () => {
                         setMissingCount(updated.length);
-                        updateStatus("⚠️ Saved (No Phone)", "#FFFF47FF");
-                        updateCaptionBadge(attorneyCaptionDiv, "⚠️ Saved (No Phone)", "#FFD52FFF");
+                        updateStatus(label, "#FBBF24");
+                        updateCaptionBadge(attorneyCaptionDiv, label, "#FBBF24");
                         if (targetSpan) targetSpan.style.backgroundColor = "#FFFF1FFF";
                     });
                 }
 
             } catch (error) {
-                updateStatus("Err!", "red");
-                updateCaptionBadge(attorneyCaptionDiv, "Err!", "red");
+                updateStatus("Err!", "#F87171");
+                updateCaptionBadge(attorneyCaptionDiv, "Err!", "#F87171");
                 console.error(error);
             }
         });
@@ -321,24 +467,42 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
 
     return (
         <>
-        <div className="w-full flex flex-col gap-2">
-            <div className="flex flex-col text-[9px] text-center font-mono bg-slate-800 rounded py-[2px]">
-                <div className="text-slate-400">{scraperType}</div>
-                <div className='w-full flex flex-row justify-around'>
-                    <span className="text-green-400">✅ {validCount}</span>
-                    <span className="text-yellow-400">⚠️ {missingCount}</span>
+        <div style={wrapStyle}>
+            {/* Type + counts card */}
+            <div style={cardStyle}>
+                <div style={typeLabelStyle}>
+                    {scraperType}
+                </div>
+                <div style={countsRowStyle}>
+                    <div style={countItemStyle} title="Valid leads">
+                        <span style={{ ...dotStyle, backgroundColor: '#34D399' }} />
+                        <span style={{ ...countTextStyle, color: '#34D399' }}>{validCount}</span>
+                    </div>
+                    <div style={dividerStyle} />
+                    <div style={countItemStyle} title="Missing / invalid phone">
+                        <span style={{ ...dotStyle, backgroundColor: '#FBBF24' }} />
+                        <span style={{ ...countTextStyle, color: '#FBBF24' }}>{missingCount}</span>
+                    </div>
                 </div>
             </div>
 
+            {/* Scan button — brass/seal accent */}
             <button
                 id="scanLeadBtn"
                 onClick={scanLead}
-                className='bg-green-400 hover:bg-green-500 text-slate-900 rounded-[8px] py-[4px] font-bold cursor-pointer w-full text-[14px]'
+                style={scanButtonStyle}
+                onMouseDown={(e) => { e.currentTarget.style.transform = 'translateY(1px)'; e.currentTarget.style.boxShadow = 'none'; }}
+                onMouseUp={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 0 rgba(0,0,0,0.28)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 2px 0 rgba(0,0,0,0.28)'; }}
             >
                 Scan
             </button>
 
-            <div style={{ color: status.color, fontSize: '11px', textAlign: 'left' }}>
+            {/* Status line */}
+            <div
+                style={{ ...statusLineStyle, color: status.color }}
+                title={status.msg}
+            >
                 {status.msg}
             </div>
         </div>
@@ -350,7 +514,7 @@ if (phone && phone.replace(/\D/g, "").length < 10) {
                     key={t.id}
                     style={{
                         ...toastStyle,
-                        borderLeft: `4px solid ${t.color}`,
+                        borderLeft: `3px solid ${t.color}`,
                         opacity: t.fading ? 0 : 1,
                     }}
                 >
