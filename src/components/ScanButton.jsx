@@ -202,6 +202,7 @@ const extractUSPhone = (segment) => {
         return ""; // toll-free — reject
     }
 
+    // ✅ 000-000-0000 format mein return karo (kisi bhi input format se)
     return `${tenDigits.slice(0, 3)}-${tenDigits.slice(3, 6)}-${tenDigits.slice(6)}`;
 };
 

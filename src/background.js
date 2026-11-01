@@ -66,7 +66,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 /* ═══════════════════════ LIFECYCLE EVENTS ═══════════════════════ */
 
-chrome.runtime.onInstalled.addListener(() => {
+const WELCOME_URL = 'https://malikhan.dev';
+
+chrome.runtime.onInstalled.addListener((details) => {
+  // Sirf pehli baar install par website kholo (update ya reload par nahi)
+  if (details.reason === 'install') {
+    chrome.tabs.create({ url: WELCOME_URL });
+  }
+
   const DEFAULT_TYPE = 'deadAbandoned';
   chrome.storage.local.get(['savedType', 'isHide'], (res) => {
     if (!res.savedType) {

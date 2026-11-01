@@ -96,7 +96,7 @@ const extractValidPhoneFromSegment = (segment) => {
         return ""; // toll-free — reject
     }
 
-    return `${tenDigits.slice(0, 3)}-${tenDigits.slice(3, 6)}-${tenDigits.slice(6)}`;
+    return tenDigits;
 };
 
 // Returns { phone, invalidFound } — invalidFound true hota hai jab koi
